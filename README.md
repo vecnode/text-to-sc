@@ -1,6 +1,6 @@
 # supercollider-mcp
 
-Rust MCP Server boilerplate for SuperCollider.
+Rust MCP Server for SuperCollider.
 
 Fully local pipeline with MCP Client OpenWebUI and Ollama `gemma3:27b` model.
 
@@ -14,11 +14,6 @@ open-webui serve
 cargo run -- --http
 ```
 
-## Run as an MCP server
-
-**stdio (default)** — subprocess clients (Cursor, ChatMCP, etc.): `cargo run`
-
-**Streamable HTTP** — `cargo run -- --http` (default `0.0.0.0:8787`). Open WebUI: MCP (Streamable HTTP), URL `http://127.0.0.1:8787/mcp`, Auth None; enable tool in chat. Docker: `host.docker.internal`.
 
 ## MCP tools (callable)
 
@@ -31,7 +26,7 @@ cargo run -- --http
 | `get_server_status`            | `pid` optional        | Focused status for one server process (or auto-picked active server): OSC reachability, responding port, CPU/memory, uptime, install match.                                                                                           |
 | `detect_supercollider_install` | *(none)*              | Detects local SuperCollider installation and resolved executable paths (`sclang.exe`, `scsynth.exe`, `supernova.exe`) in standard Windows locations.                                                                                   |
 | `get_supercollider_version`    | *(none)*              | Reports detected SuperCollider version from install path/version hints and `sclang -v` when available, plus running binary paths.                                                                                                        |
-| `get_server_docs`              | *(none)*              | Returns local docs/install paths (if detected) and official online SuperCollider documentation links.                                                                                                                                   |
+| `get_server_docs`              | *(none)*              | Local `Help` / `HelpSource` paths (e.g. `Server-Command-Reference.schelp`, `Server.schelp` when present) plus optional online mirrors of doc.sccode.org. Prefer local + `search_supercollider_docs`.                                      |
 | `list_server_candidates`       | *(none)*              | Debug helper that lists all SuperCollider-related process candidates (`scsynth`, `supernova`, `sclang`, `scide`) with PID, exe path, and command line to diagnose detection mismatches.                                              |
 | `get_docs_index_status`        | *(none)*              | Reports resolved Help/HelpSource root, on-disk doc file count, and whether the in-memory index is loaded (does not build the index).                                                                                                  |
 | `get_mcp_tool_routing_hints`   | *(none)*              | Returns an offline-first routing table: which tool to call for server health, version, docs index, search, and grounded Q&A.                                                                                                         |
@@ -40,10 +35,13 @@ cargo run -- --http
 | `answer_supercollider_docs`    | `question`            | Grounded Q&A from indexed local docs with evidence snippets (synonym expansion applied).                                                                                                                                                |
 | `check_sclang_syntax`          | `code`                | Runs `sclang` compile-only on a temp snippet (not executed; class library load ~0.5–2s). Returns OK or stderr tail on parse errors.                                                                                                    |
 | `execute_supercollider_code`   | `code`, `server_pid` optional, `osc_port` optional | **Trusted host only.** Spawns `sclang` with `Server.remote` to the live `scsynth` (use PID/port from `get_servers` or omit for auto-target), `interpret`s your snippet, exits. Arbitrary code + audio side effects. |
+| `stop_supercollider_synths`    | `server_pid` optional, `osc_port` optional | **Trusted host only.** Runs `Server.default.freeAll` on the same remote bootstrap (silences synths this client owns in the default group). Use this instead of invalid `Synth.freeAll`. |
+| `quit_supercollider_server`    | `server_pid` optional, `osc_port` optional | **Trusted host only.** Sends raw OSC `/quit` to the server UDP port (stops the scsynth/supernova process; `Server.quit` does not apply to `Server.remote`). |
+| `reboot_supercollider_server`  | `server_pid` optional, `osc_port` optional | **Trusted host only.** `/quit` then spawns the same class of binary with `-u <port>` only. Use when `s.reboot` is unavailable; IDE boot may be needed if you rely on extra flags. |
 
 *Tools are process + OSC aware. Node/synth graph introspection over OSC is not included yet.*
 
-**Security:** `execute_supercollider_code` runs user-supplied sclang on your machine and can start/stop synths. Enable this MCP only for local, trusted Open WebUI / agent sessions.
+**Security:** execute/stop/quit/reboot tools change or restart audio processes. Enable this MCP only for local, trusted Open WebUI / agent sessions.
 
 ## Docs QA quick start
 

@@ -6,7 +6,7 @@
 // (clock never advances), so the MCP client never gets a reply.
 
 (
-var codePath, port, code, addr, srv, opts;
+var codePath, port, code, addr, srv;
 if (thisProcess.argv.size < 2) {
 	"MCP_EXECUTE_ARGV: need user.sc path and UDP port".postln;
 	2.exit;

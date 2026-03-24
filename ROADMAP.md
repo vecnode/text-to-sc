@@ -2,6 +2,7 @@
 
 ## Ongoing
 
+- [ ] Music theory tool - midware
 - [ ] OSC server introspection (nodes / synth stats) as opt-in tools with strict timeouts.
 - [ ] Persist docs index to disk for faster cold start and version-stamped cache invalidation.
 - [ ] Semantic re-ranking (local embeddings) for docs — only if keyword retrieval plateaus.
@@ -28,4 +29,6 @@
 - [x] README — Open WebUI-oriented docs workflow and tool table updates.
 - [x] Richer `.schelp` indexing — `link::` / `related::` token extraction for cross-ref scoring; `LIST::` / `##` line normalization; inline link expansion in prose; `list` section tie-break boost.
 - [x] `check_sclang_syntax` MCP tool — `sclang` compile-only bootstrap (`assets/sclang_syntax_bootstrap.sc`), no snippet execution / no audio.
-- [x] `execute_supercollider_code` MCP tool — `sclang` + `Server.remote` + `interpret` against live scsynth (`assets/sclang_remote_execute.sc`); optional `server_pid` / `osc_port` from `get_servers`.
+- [x] `execute_supercollider_code` MCP tool — `sclang` + `Server.remote` + `interpret` against live scsynth (`assets/sclang_remote_execute.sc`); optional `server_pid` / `osc_port` from `get_servers`. Verified end-to-end with live scsynth (Open WebUI); headless-main-thread `.wait` deadlock removed; `get_server_docs` local-first `.schelp` paths.
+- [x] `stop_supercollider_synths` MCP tool — `Server.default.freeAll` via the same execute path (correct stop vs invalid `Synth.freeAll`); optional `server_pid` / `osc_port`.
+- [x] `quit_supercollider_server` / `reboot_supercollider_server` — raw OSC `/quit` from MCP (sclang `Server.quit` / `Server.reboot` refuse `Server.remote`); reboot respawns `scsynth`/`supernova` with `-u` only.

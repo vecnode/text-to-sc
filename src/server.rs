@@ -69,8 +69,16 @@ pub struct SclangSyntaxParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StopSupercolliderSynthsParams {
+    /// Target `scsynth` / `supernova` PID from `get_servers`. Omit to use first OSC-reachable server.
+    pub server_pid: Option<u32>,
+    /// Override UDP port scsynth listens on (e.g. 57110). Omit to use PID / auto detection.
+    pub osc_port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExecuteSupercolliderParams {
-    /// sclang source to run against the live audio server (e.g. `{ SinOsc.ar }.play;` or `Synth(\\default)`).
+    /// sclang to run on the live server. Examples: `Synth(\\default);` or `x = Synth(\\default);`. For audio from a UGen function use `{ SinOsc.ar * 0.1 }.play;`. Do not use `{ Synth(\\default) }.play` (that wraps Synth in a Function; `.play` on `{ }` is only for functions that return a UGen graph). To stop all synths use tool `stop_supercollider_synths` or `Server.default.freeAll;` (not `Synth.freeAll`).
     pub code: String,
     /// Target `scsynth` / `supernova` PID from `get_servers`. Omit to use first OSC-reachable server.
     pub server_pid: Option<u32>,
@@ -383,7 +391,7 @@ impl SupercolliderMcpServer {
     }
 
     #[tool(
-        description = "SECURITY: runs arbitrary sclang against your live scsynth (Server.remote + interpret). Prefer check_sclang_syntax first. Pass server_pid/osc_port from get_servers or omit for auto-target. Trust this MCP only on your own machine."
+        description = "SECURITY: runs arbitrary sclang against your live scsynth (Server.remote + interpret). Prefer check_sclang_syntax first. Pass server_pid/osc_port from get_servers or omit for auto-target. For default synth use `Synth(\\default);` not `{ Synth(\\default) }.play`. Trust this MCP only on your own machine."
     )]
     async fn execute_supercollider_code(
         &self,
@@ -414,13 +422,103 @@ impl SupercolliderMcpServer {
         eprintln!("[supercollider-mcp] tool ok: execute_supercollider_code — finished");
         report
     }
+
+    #[tool(
+        description = "Stops all synthesis controlled by this MCP client on the target scsynth: runs `Server.default.freeAll` via headless sclang (same trust model as execute_supercollider_code). Use for “stop sound / silence / free synths”. Not `Synth.freeAll` (invalid)."
+    )]
+    async fn stop_supercollider_synths(
+        &self,
+        Parameters(params): Parameters<StopSupercolliderSynthsParams>,
+    ) -> String {
+        eprintln!(
+            "[supercollider-mcp] tool start: stop_supercollider_synths pid={:?} port={:?}",
+            params.server_pid, params.osc_port
+        );
+        let server_pid = params.server_pid;
+        let osc_port = params.osc_port;
+        let report = match tokio::task::spawn_blocking(move || {
+            sc_process::stop_supercollider_synths(server_pid, osc_port)
+        })
+        .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[supercollider-mcp] tool error: stop_supercollider_synths — spawn_blocking join failed: {e}"
+                );
+                return format!("stop_supercollider_synths failed: {e}");
+            }
+        };
+        eprintln!("[supercollider-mcp] tool ok: stop_supercollider_synths — finished");
+        report
+    }
+
+    #[tool(
+        description = "Stops the scsynth/supernova process via raw OSC /quit (Server.quit/reboot do not work with Server.remote). Does not restart the binary — use reboot_supercollider_server or boot from IDE."
+    )]
+    async fn quit_supercollider_server(
+        &self,
+        Parameters(params): Parameters<StopSupercolliderSynthsParams>,
+    ) -> String {
+        eprintln!(
+            "[supercollider-mcp] tool start: quit_supercollider_server pid={:?} port={:?}",
+            params.server_pid, params.osc_port
+        );
+        let server_pid = params.server_pid;
+        let osc_port = params.osc_port;
+        let report = match tokio::task::spawn_blocking(move || {
+            sc_process::quit_supercollider_server(server_pid, osc_port)
+        })
+        .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[supercollider-mcp] tool error: quit_supercollider_server — spawn_blocking join failed: {e}"
+                );
+                return format!("quit_supercollider_server failed: {e}");
+            }
+        };
+        eprintln!("[supercollider-mcp] tool ok: quit_supercollider_server — finished");
+        report
+    }
+
+    #[tool(
+        description = "OSC /quit then respawns scsynth or supernova with -u <port> only. Use when the model suggests s.reboot (that fails on Server.remote). Trusted host: kills and restarts the audio server process."
+    )]
+    async fn reboot_supercollider_server(
+        &self,
+        Parameters(params): Parameters<StopSupercolliderSynthsParams>,
+    ) -> String {
+        eprintln!(
+            "[supercollider-mcp] tool start: reboot_supercollider_server pid={:?} port={:?}",
+            params.server_pid, params.osc_port
+        );
+        let server_pid = params.server_pid;
+        let osc_port = params.osc_port;
+        let report = match tokio::task::spawn_blocking(move || {
+            sc_process::reboot_supercollider_server(server_pid, osc_port)
+        })
+        .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[supercollider-mcp] tool error: reboot_supercollider_server — spawn_blocking join failed: {e}"
+                );
+                return format!("reboot_supercollider_server failed: {e}");
+            }
+        };
+        eprintln!("[supercollider-mcp] tool ok: reboot_supercollider_server — finished");
+        report
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for SupercolliderMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Use ping_supercollider for quick health; get_servers for detailed server stats; discover_supercollider for full JSON discovery; get_server_status for one PID; detect_supercollider_install/get_supercollider_version/get_server_docs for install/version/docs paths; get_docs_index_status before heavy docs use; refresh_supercollider_docs_index/search_supercollider_docs (output=json optional)/answer_supercollider_docs for grounded local docs; check_sclang_syntax to compile-check sclang; execute_supercollider_code to run sclang on the live server (trusted only); get_mcp_tool_routing_hints for intent→tool mapping.".to_string(),
+            "Use ping_supercollider for quick health; get_servers for detailed server stats; discover_supercollider for full JSON discovery; get_server_status for one PID; detect_supercollider_install/get_supercollider_version/get_server_docs for install/version/docs paths; get_docs_index_status before heavy docs use; refresh_supercollider_docs_index/search_supercollider_docs (output=json optional)/answer_supercollider_docs for grounded local docs; check_sclang_syntax to compile-check sclang; execute_supercollider_code / stop_supercollider_synths for synth graph control; quit_supercollider_server / reboot_supercollider_server for process-level /quit+respawn (raw OSC; s.reboot unavailable on remote); get_mcp_tool_routing_hints for intent→tool mapping.".to_string(),
         )
     }
 }

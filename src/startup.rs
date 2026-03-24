@@ -8,7 +8,7 @@ pub fn stdio() {
         "[supercollider-mcp] MCP over stdio (default). JSON-RPC on stdout; logs on stderr. Use --http for Streamable HTTP."
     );
     eprintln!(
-        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, get_docs_index_status, get_mcp_tool_routing_hints, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code"
+        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, get_docs_index_status, get_mcp_tool_routing_hints, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code, stop_supercollider_synths, quit_supercollider_server, reboot_supercollider_server"
     );
 }
 
@@ -21,6 +21,6 @@ pub fn streamable_http(addr: SocketAddr) {
         );
     }
     eprintln!(
-        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, get_docs_index_status, get_mcp_tool_routing_hints, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code · Ctrl+C to stop"
+        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, get_docs_index_status, get_mcp_tool_routing_hints, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code, stop_supercollider_synths, quit_supercollider_server, reboot_supercollider_server · Ctrl+C to stop"
     );
 }

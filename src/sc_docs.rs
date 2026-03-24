@@ -885,15 +885,21 @@ pub fn get_mcp_tool_routing_hints() -> String {
 | Is SC running? / server up? | ping_supercollider, get_server_status, get_servers |
 | Version / install path | get_supercollider_version, detect_supercollider_install |
 | Where are docs on disk? | get_server_docs, get_docs_index_status |
+| Connect to server / Server.remote / OSC | search_supercollider_docs or answer_supercollider_docs first; get_server_docs lists local Server-Command-Reference.schelp + Server.schelp |
 | Is the docs index warm? | get_docs_index_status |
 (re)build docs index | refresh_supercollider_docs_index |
 | Search help for class/topic | search_supercollider_docs (use output=json for structured citations) |
 | Explain from help only | answer_supercollider_docs |
 | Validate sclang syntax (no audio) | check_sclang_syntax |
 | Run code on live scsynth (trusted host) | execute_supercollider_code (optional server_pid/osc_port from get_servers) |
+| Stop / silence all synths (default group, this client) | stop_supercollider_synths (uses `Server.default.freeAll` — not `Synth.freeAll`) |
+| Kill scsynth/supernova process (OSC /quit) | quit_supercollider_server |
+| Restart audio server process (OSC /quit then spawn -u port) | reboot_supercollider_server (`s.reboot` fails on Server.remote) |
 | Debug process detection | list_server_candidates, discover_supercollider |
 
 Docs tools use local Help/HelpSource only. source=web is not supported.
+
+When explaining server connection: cite local .schelp paths from get_server_docs or evidence from search/answer — do not default to doc.sccode.org if local files exist.
 
 Workflow: get_docs_index_status → refresh_supercollider_docs_index (if needed) → search or answer."#
         .to_string()

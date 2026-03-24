@@ -17,7 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use sysinfo::{DiskUsage, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{DiskUsage, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// Embedded bootstrap: `sclang bootstrap.sc /path/to/snippet.sc` — compile-only, exit 0/1.
 const SCLANG_SYNTAX_BOOTSTRAP: &str = include_str!("../assets/sclang_syntax_bootstrap.sc");
@@ -30,6 +30,13 @@ const DEFAULT_SC_PORTS: [u16; 2] = [57110, 57120];
 
 /// Headless `sclang` + class library + `Server.remote` can take tens of seconds; user code may loop — cap wait.
 const SCLANG_EXECUTE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Poll interval while waiting for scsynth to exit or `/status` after respawn.
+const SERVER_OSC_CONTROL_POLL: Duration = Duration::from_millis(200);
+/// Max wait after OSC `/quit` for the old server PID to disappear.
+const SERVER_QUIT_WAIT_MAX: Duration = Duration::from_secs(15);
+/// Max wait after respawn for `/status.reply` on the UDP port.
+const SERVER_BOOT_WAIT_MAX: Duration = Duration::from_secs(25);
 
 /// Run a subprocess with captured stdout/stderr, draining pipes so Windows cannot deadlock on full buffers.
 /// If `timeout` elapses before exit, the child is killed.
@@ -202,6 +209,71 @@ fn osc_status_alive(addr: SocketAddr) -> bool {
     match socket.recv_from(&mut buf) {
         Ok((n, _src)) => buf[..n].windows(b"/status.reply".len()).any(|w| w == b"/status.reply"),
         Err(_) => false,
+    }
+}
+
+fn osc_quit_packet() -> Vec<u8> {
+    let mut buf = Vec::with_capacity(32);
+    osc_padded_string("/quit", &mut buf);
+    osc_padded_string(",", &mut buf);
+    buf
+}
+
+/// Raw OSC `/quit` on UDP — works when `Server.quit` / `Server.reboot` refuse `Server.remote` instances.
+fn send_osc_quit(port: u16) -> bool {
+    let socket = match UdpSocket::bind("127.0.0.1:0") {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = socket.set_write_timeout(Some(Duration::from_millis(500)));
+    let packet = osc_quit_packet();
+    socket
+        .send_to(&packet, SocketAddr::from(([127, 0, 0, 1], port)))
+        .is_ok()
+}
+
+fn process_alive(pid_u: u32) -> bool {
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    sys.process(Pid::from_u32(pid_u)).is_some()
+}
+
+fn wait_process_gone(pid: u32) -> bool {
+    let deadline = Instant::now() + SERVER_QUIT_WAIT_MAX;
+    while Instant::now() < deadline {
+        if !process_alive(pid) {
+            return true;
+        }
+        thread::sleep(SERVER_OSC_CONTROL_POLL);
+    }
+    false
+}
+
+fn wait_server_responding(port: u16) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let deadline = Instant::now() + SERVER_BOOT_WAIT_MAX;
+    while Instant::now() < deadline {
+        if osc_status_alive(addr) {
+            return true;
+        }
+        thread::sleep(SERVER_OSC_CONTROL_POLL);
+    }
+    false
+}
+
+fn pick_server_exe(srv: &ScServerInstance, install: Option<&ScInstallInfo>) -> Option<PathBuf> {
+    if let Some(ref p) = srv.exe_path {
+        let pb = PathBuf::from(p);
+        if pb.is_file() {
+            return Some(pb);
+        }
+    }
+    let inst = install?;
+    let name_lower = srv.name.to_lowercase();
+    if is_supernova(&name_lower) {
+        inst.supernova_path.as_ref().map(PathBuf::from)
+    } else {
+        inst.scsynth_path.as_ref().map(PathBuf::from)
     }
 }
 
@@ -453,20 +525,21 @@ pub fn check_sclang_syntax(code: &str) -> String {
     }
 }
 
-fn resolve_execute_target(
+fn resolve_control_target(
     server_pid: Option<u32>,
     osc_port: Option<u16>,
-) -> Result<(u16, u32), String> {
+) -> Result<(ScServerInstance, u16), String> {
     if let Some(port) = osc_port.filter(|&p| p > 0) {
         let snap = collect_snapshot()?;
-        let pid = snap
+        let srv = snap
             .servers
             .iter()
             .find(|s| s.responding_port == Some(port))
-            .map(|s| s.pid)
-            .or_else(|| snap.servers.first().map(|s| s.pid))
-            .unwrap_or(0);
-        return Ok((port, pid));
+            .or_else(|| snap.servers.first())
+            .ok_or_else(|| {
+                "No SuperCollider audio server found; boot scsynth/supernova first.".to_string()
+            })?;
+        return Ok((srv.clone(), port));
     }
     let snap = collect_snapshot()?;
     let srv = match server_pid {
@@ -490,7 +563,113 @@ fn resolve_execute_target(
             srv.pid
         )
     })?;
+    Ok((srv.clone(), port))
+}
+
+fn resolve_execute_target(
+    server_pid: Option<u32>,
+    osc_port: Option<u16>,
+) -> Result<(u16, u32), String> {
+    let (srv, port) = resolve_control_target(server_pid, osc_port)?;
     Ok((port, srv.pid))
+}
+
+/// Stop the **scsynth/supernova process** via OSC `/quit` (not the same as freeing synth nodes).  
+/// `Server.quit` / `Server.reboot` do not apply to `Server.remote` in sclang; this uses raw UDP.  
+/// Does not restart the binary — use `reboot_supercollider_server` for quit+respawn.
+pub fn quit_supercollider_server(server_pid: Option<u32>, osc_port: Option<u16>) -> String {
+    let (srv, port) = match resolve_control_target(server_pid, osc_port) {
+        Ok(x) => x,
+        Err(e) => return format!("quit_supercollider_server failed: {e}"),
+    };
+    if !send_osc_quit(port) {
+        return format!("quit_supercollider_server failed: UDP send /quit to 127.0.0.1:{port} failed");
+    }
+    let gone = wait_process_gone(srv.pid);
+    format!(
+        "quit_supercollider_server: {}\n- sent OSC /quit to 127.0.0.1:{port}\n- previous_pid={}\n- process_exited={gone}\n- note: Restart scsynth from the SuperCollider IDE or `reboot_supercollider_server` if you need it running again.",
+        if gone { "OK" } else { "PARTIAL (PID still alive or still exiting; check get_servers)" },
+        srv.pid
+    )
+}
+
+/// OSC `/quit` then spawn the same class of server (`scsynth` or `supernova`) with **`-u <port>` only**.  
+/// Use when `s.reboot` is unavailable (remote server). If audio fails, boot from the IDE with your usual flags.
+pub fn reboot_supercollider_server(server_pid: Option<u32>, osc_port: Option<u16>) -> String {
+    let install = detect_install_impl();
+    let (srv, port) = match resolve_control_target(server_pid, osc_port) {
+        Ok(x) => x,
+        Err(e) => return format!("reboot_supercollider_server failed: {e}"),
+    };
+    let Some(exe) = pick_server_exe(&srv, install.as_ref()) else {
+        return "reboot_supercollider_server failed: could not resolve scsynth.exe / supernova.exe path (exe_path missing and install not detected).".to_string();
+    };
+    if !send_osc_quit(port) {
+        return format!("reboot_supercollider_server failed: UDP send /quit to 127.0.0.1:{port} failed");
+    }
+    if !wait_process_gone(srv.pid) {
+        return format!(
+            "reboot_supercollider_server failed: pid {} still alive after /quit (waited {:?}). Try quit_supercollider_server again or end the process manually.",
+            srv.pid, SERVER_QUIT_WAIT_MAX
+        );
+    }
+
+    let child = match Command::new(&exe).arg("-u").arg(port.to_string()).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return format!(
+                "reboot_supercollider_server failed: spawn {:?} -u {}: {e}",
+                exe, port
+            );
+        }
+    };
+    let new_id = child.id();
+
+    if wait_server_responding(port) {
+        format!(
+            "reboot_supercollider_server: OK\n- exe={}\n- osc_udp_port={port}\n- previous_pid={}\n- spawned_pid={new_id}\n- /status.reply: yes\n- note: minimal args (-u only). Prefer IDE boot if your setup needs extra flags.",
+            path_to_string(&exe),
+            srv.pid
+        )
+    } else {
+        format!(
+            "reboot_supercollider_server: PARTIAL\n- exe={}\n- osc_udp_port={port}\n- previous_pid={}\n- spawned_pid={new_id}\n- /status.reply: no within {:?}\n- process may still be starting; check get_servers / ping_supercollider.",
+            path_to_string(&exe),
+            srv.pid,
+            SERVER_BOOT_WAIT_MAX
+        )
+    }
+}
+
+/// After `Server.remote`, `Server.default` is the target; this frees all nodes in the default group (same as IDE “stop” scope for that client).
+const STOP_ALL_SYNTHS_SCLANG: &str = "Server.default.freeAll;";
+
+/// Free every synth/node under this client’s default group on the live server (via `execute_supercollider_code`).
+///
+/// Note: `Synth.freeAll` is not valid SuperCollider; use `Server.default.freeAll`.
+pub fn stop_supercollider_synths(server_pid: Option<u32>, osc_port: Option<u16>) -> String {
+    let inner = execute_supercollider_code(STOP_ALL_SYNTHS_SCLANG, server_pid, osc_port);
+    if inner.starts_with("execute_supercollider_code: OK") {
+        inner.replacen(
+            "execute_supercollider_code: OK",
+            "stop_supercollider_synths: OK (interpreted Server.default.freeAll)",
+            1,
+        )
+    } else if inner.starts_with("execute_supercollider_code: ERROR") {
+        inner.replacen(
+            "execute_supercollider_code: ERROR",
+            "stop_supercollider_synths: ERROR",
+            1,
+        )
+    } else if inner.starts_with("execute_supercollider_code failed:") {
+        inner.replacen(
+            "execute_supercollider_code failed:",
+            "stop_supercollider_synths failed:",
+            1,
+        )
+    } else {
+        format!("stop_supercollider_synths:\n{inner}")
+    }
 }
 
 /// Run `code` on the **live** scsynth/supernova using headless `sclang` and `Server.remote` to `127.0.0.1:port`.
@@ -992,20 +1171,61 @@ pub fn detect_supercollider_install() -> String {
     out
 }
 
-/// Return useful local docs paths and online docs links.
+fn push_path_if_exists(label: &str, path: &Path, out: &mut String) {
+    if path.exists() {
+        let _ = writeln!(out, "- {}={}", label, path_to_string(path));
+    }
+}
+
+/// Local `Help` / `HelpSource` paths plus optional online mirrors of the same material.
 pub fn get_server_docs() -> String {
     let install = detect_install_impl();
     let mut out = String::new();
     out.push_str("SuperCollider docs pointers:\n");
+    out.push_str("- note: Prefer local paths and search_supercollider_docs / answer_supercollider_docs (offline). Online entries are optional mirrors of doc.sccode.org.\n");
+
     if let Some(i) = install {
-        let help_dir = PathBuf::from(&i.base_dir).join("Help");
-        let _ = writeln!(out, "- local_help_dir={}", path_to_string(&help_dir));
+        let base = PathBuf::from(&i.base_dir);
+        let help_dir = base.join("Help");
+        let help_source = base.join("HelpSource");
         let _ = writeln!(out, "- local_install_dir={}", i.base_dir);
+        push_path_if_exists("local_help_dir", &help_dir, &mut out);
+        push_path_if_exists("local_help_source_dir", &help_source, &mut out);
+
+        push_path_if_exists(
+            "local_server_command_reference_schelp",
+            &help_source.join("Reference").join("Server-Command-Reference.schelp"),
+            &mut out,
+        );
+        push_path_if_exists(
+            "local_server_guide_schelp",
+            &help_source.join("Guides").join("Server-Guide.schelp"),
+            &mut out,
+        );
+        push_path_if_exists(
+            "local_server_class_schelp",
+            &help_source.join("Classes").join("Server.schelp"),
+            &mut out,
+        );
+        push_path_if_exists(
+            "local_server_command_reference_html",
+            &help_dir.join("Reference").join("Server-Command-Reference.html"),
+            &mut out,
+        );
     } else {
         out.push_str("- local_install_dir=<not detected>\n");
     }
-    out.push_str("- online_docs=https://doc.sccode.org/\n");
-    out.push_str("- server_command_reference=https://doc.sccode.org/Reference/Server-Command-Reference.html\n");
+
+    let _ = writeln!(out, "- online_docs_mirror=https://doc.sccode.org/");
+    let _ = writeln!(out, "- online_docs=https://doc.sccode.org/ (alias of online_docs_mirror)");
+    let _ = writeln!(
+        out,
+        "- online_server_command_reference_mirror=https://doc.sccode.org/Reference/Server-Command-Reference.html"
+    );
+    let _ = writeln!(
+        out,
+        "- server_command_reference=https://doc.sccode.org/Reference/Server-Command-Reference.html (alias: same URL as online_server_command_reference_mirror)"
+    );
     out
 }
 
