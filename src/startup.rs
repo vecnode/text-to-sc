@@ -6,7 +6,9 @@ pub fn stdio() {
     eprintln!(
         "[supercollider-mcp] MCP over stdio (default). JSON-RPC on stdout; logs on stderr. Use --http for Streamable HTTP."
     );
-    eprintln!("[supercollider-mcp] tools: ping_supercollider, get_servers");
+    eprintln!(
+        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs"
+    );
 }
 
 pub fn streamable_http(addr: SocketAddr) {
@@ -17,5 +19,7 @@ pub fn streamable_http(addr: SocketAddr) {
             addr.port()
         );
     }
-    eprintln!("[supercollider-mcp] tools: ping_supercollider, get_servers · Ctrl+C to stop");
+    eprintln!(
+        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs · Ctrl+C to stop"
+    );
 }

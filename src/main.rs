@@ -5,6 +5,7 @@ use clap::Parser;
 use rmcp::{transport::stdio, ServiceExt};
 
 mod sc_process;
+mod sc_docs;
 mod server;
 mod startup;
 mod streamable_http;
