@@ -33,16 +33,29 @@ cargo run -- --http
 | `get_supercollider_version`    | *(none)*              | Reports detected SuperCollider version from install path/version hints and `sclang -v` when available, plus running binary paths.                                                                                                        |
 | `get_server_docs`              | *(none)*              | Returns local docs/install paths (if detected) and official online SuperCollider documentation links.                                                                                                                                   |
 | `list_server_candidates`       | *(none)*              | Debug helper that lists all SuperCollider-related process candidates (`scsynth`, `supernova`, `sclang`, `scide`) with PID, exe path, and command line to diagnose detection mismatches.                                              |
-| `refresh_supercollider_docs_index` | *(none)*          | Builds or refreshes a local index from the installed SuperCollider Help docs. Run this after installation upgrades or if search quality drops.                                                                                           |
-| `search_supercollider_docs`    | `query`, `max_results` optional | Searches indexed local docs and returns ranked snippets with source citations (file paths under the Help tree).                                                                                                                          |
-| `answer_supercollider_docs`    | `question`            | Returns a grounded docs answer with evidence snippets and citations from local indexed docs.                                                                                                                                             |
+| `get_docs_index_status`        | *(none)*              | Reports resolved Help/HelpSource root, on-disk doc file count, and whether the in-memory index is loaded (does not build the index).                                                                                                  |
+| `get_mcp_tool_routing_hints`   | *(none)*              | Returns an offline-first routing table: which tool to call for server health, version, docs index, search, and grounded Q&A.                                                                                                         |
+| `refresh_supercollider_docs_index` | *(none)*          | Builds or refreshes a local in-memory index from `Help` / `HelpSource` (section-aware `.schelp`). Run after SC upgrades or if search quality drops.                                                                                     |
+| `search_supercollider_docs`    | `query`, `max_results`, `output`, `source` optional | Ranked local doc search with synonym expansion. Set `output=json` for structured citations. `source=local` (default); `web` is not supported (offline-first).                                                                           |
+| `answer_supercollider_docs`    | `question`            | Grounded Q&A from indexed local docs with evidence snippets (synonym expansion applied).                                                                                                                                                |
+| `check_sclang_syntax`          | `code`                | Runs `sclang` compile-only on a temp snippet (not executed; class library load ~0.5–2s). Returns OK or stderr tail on parse errors.                                                                                                    |
+| `execute_supercollider_code`   | `code`, `server_pid` optional, `osc_port` optional | **Trusted host only.** Spawns `sclang` with `Server.remote` to the live `scsynth` (use PID/port from `get_servers` or omit for auto-target), `interpret`s your snippet, exits. Arbitrary code + audio side effects. |
 
 *Tools are process + OSC aware. Node/synth graph introspection over OSC is not included yet.*
 
+**Security:** `execute_supercollider_code` runs user-supplied sclang on your machine and can start/stop synths. Enable this MCP only for local, trusted Open WebUI / agent sessions.
+
 ## Docs QA quick start
 
-1. Run `detect_supercollider_install` to confirm install paths.
-2. Run `refresh_supercollider_docs_index` once per session (or after updates).
-3. Use `search_supercollider_docs` for retrieval and `answer_supercollider_docs` for grounded Q/A.
+1. Run `detect_supercollider_install` (or `get_supercollider_version`) to confirm install paths.
+2. Run `get_docs_index_status` — if `index_loaded=false`, run `refresh_supercollider_docs_index`.
+3. For class/symbol lookup, call `search_supercollider_docs` with `output=json` so the model gets structured citations.
+4. For explanations, call `answer_supercollider_docs`; encourage the model to quote cited paths and example code from the tool output.
+5. If the model picks the wrong tool, call `get_mcp_tool_routing_hints` once per session.
+
+### Open WebUI (example flow)
+
+- Add MCP server URL `http://127.0.0.1:8787/mcp` (Streamable HTTP).
+- In chat, enable tools. For a coding question: first **search** (`search_supercollider_docs`), then **answer** (`answer_supercollider_docs`) using the same topic so retrieval and summary stay aligned.
 
 **Robustness:** `--bind` is validated at startup. Tools log `tool error:` on stderr if the background task fails; `tool ok:` only after a successful run. Process scans are panic-guarded so a bad `sysinfo` state returns a string error instead of crashing the MCP server.

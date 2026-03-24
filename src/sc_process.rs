@@ -1,4 +1,9 @@
-//! SuperCollider discovery and health checks (process + OSC + install matching).
+//! SuperCollider **runtime discovery** for MCP tools: processes, install paths, and OSC reachability.
+//!
+//! - **Single snapshot** — an internal `collect_snapshot` pass feeds `probe`, `get_servers`, `discover_supercollider`, etc., so one
+//!   scan gives consistent answers.
+//! - **OSC `/status`** — complements name-based checks (e.g. sclang without scsynth).
+//! - **Install detection** — Windows-oriented (`where.exe`, Program Files, running binary parents).
 
 use std::collections::{BTreeSet, HashMap};
 use std::env;
@@ -6,15 +11,93 @@ use std::fmt::Write as _;
 use std::net::{SocketAddr, UdpSocket};
 use std::panic;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use sysinfo::{DiskUsage, ProcessRefreshKind, ProcessesToUpdate, System};
 
+/// Embedded bootstrap: `sclang bootstrap.sc /path/to/snippet.sc` — compile-only, exit 0/1.
+const SCLANG_SYNTAX_BOOTSTRAP: &str = include_str!("../assets/sclang_syntax_bootstrap.sc");
+
+/// `sclang bootstrap.sc user.sc PORT` — `Server.remote` + interpret (live server).
+const SCLANG_REMOTE_EXECUTE_BOOTSTRAP: &str = include_str!("../assets/sclang_remote_execute.sc");
+
+/// Well-known default UDP ports scsynth may listen on (still combined with `-u` from argv when present).
 const DEFAULT_SC_PORTS: [u16; 2] = [57110, 57120];
 
+/// Headless `sclang` + class library + `Server.remote` can take tens of seconds; user code may loop — cap wait.
+const SCLANG_EXECUTE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Run a subprocess with captured stdout/stderr, draining pipes so Windows cannot deadlock on full buffers.
+/// If `timeout` elapses before exit, the child is killed.
+fn command_output_with_timeout(
+    cmd: &mut Command,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn failed: {e}"))?;
+    let mut stdout_pipe = child.stdout.take().ok_or_else(|| "stdout pipe missing".to_string())?;
+    let mut stderr_pipe = child.stderr.take().ok_or_else(|| "stderr pipe missing".to_string())?;
+
+    let stdout_thread = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf);
+        buf
+    });
+    let stderr_thread = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buf);
+        buf
+    });
+
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_thread.join();
+                    let _ = stderr_thread.join();
+                    return Err(format!(
+                        "subprocess timed out after {}s (process killed)",
+                        timeout.as_secs()
+                    ));
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(format!("try_wait failed: {e}"));
+            }
+        }
+    };
+
+    let stdout = stdout_thread
+        .join()
+        .map_err(|_| "stdout reader thread panicked".to_string())?;
+    let stderr = stderr_thread
+        .join()
+        .map_err(|_| "stderr reader thread panicked".to_string())?;
+
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+// --- Snapshot DTOs (`discover_supercollider` embeds these via `serde_json`) ---
+
+/// Best-effort install root plus resolved EXE paths.
 #[derive(Clone, Serialize)]
 struct ScInstallInfo {
     base_dir: String,
@@ -23,6 +106,7 @@ struct ScInstallInfo {
     supernova_path: Option<String>,
 }
 
+/// Any tracked SuperCollider-related process (`sclang`, `scsynth`, `scide`, …).
 #[derive(Clone, Serialize)]
 struct ScProcessCandidate {
     pid: u32,
@@ -32,6 +116,7 @@ struct ScProcessCandidate {
     role: String,
 }
 
+/// A live audio server binary (`scsynth` or `supernova`) plus stats and OSC probe result.
 #[derive(Clone, Serialize)]
 struct ScServerInstance {
     pid: u32,
@@ -51,6 +136,7 @@ struct ScServerInstance {
     install_match: String,
 }
 
+/// Full picture returned by one `collect_snapshot_impl` pass.
 #[derive(Clone, Serialize)]
 struct ScSnapshot {
     logical_cpus: usize,
@@ -59,6 +145,8 @@ struct ScSnapshot {
     candidates: Vec<ScProcessCandidate>,
     osc_port_results: HashMap<u16, bool>,
 }
+
+// --- Process image name → logical role (substring match on lowercase name) ---
 
 fn is_scsynth(name_lower: &str) -> bool {
     name_lower.contains("scsynth")
@@ -79,6 +167,8 @@ fn is_scide(name_lower: &str) -> bool {
 fn path_to_string(p: &Path) -> String {
     p.to_string_lossy().to_string()
 }
+
+// --- OSC `/status` → `/status.reply` on UDP (localhost) ---
 
 fn osc_padded_string(s: &str, out: &mut Vec<u8>) {
     out.extend_from_slice(s.as_bytes());
@@ -115,6 +205,8 @@ fn osc_status_alive(addr: SocketAddr) -> bool {
     }
 }
 
+// --- Argv parsing: `scsynth -u 57112`, `-u=57112`, `-u57112` ---
+
 fn parse_port_candidate(token: &str) -> Option<u16> {
     token.parse::<u16>().ok().filter(|p| *p > 0)
 }
@@ -148,6 +240,8 @@ fn parse_sc_ports(cmdline: &str) -> Vec<u16> {
     out
 }
 
+// --- Install directory candidates (registry-style layout not required) ---
+
 fn detect_install_candidates() -> Vec<PathBuf> {
     let mut dirs = BTreeSet::new();
 
@@ -179,6 +273,7 @@ fn detect_install_candidates() -> Vec<PathBuf> {
     dirs.into_iter().collect()
 }
 
+/// Resolve `binary` on `%PATH%` via the Windows `where` command.
 fn paths_from_where(binary: &str) -> Vec<PathBuf> {
     let output = match Command::new("where").arg(binary).output() {
         Ok(o) if o.status.success() => o,
@@ -193,6 +288,7 @@ fn paths_from_where(binary: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Derive likely install roots from live `sclang` / `scsynth` / `scide` EXE paths.
 fn process_hint_dirs() -> Vec<PathBuf> {
     let mut sys = System::new();
     sys.refresh_processes(ProcessesToUpdate::All, true);
@@ -260,6 +356,7 @@ fn detect_install_impl() -> Option<ScInstallInfo> {
     None
 }
 
+/// Exposes the first resolved install root for sibling modules (e.g. docs indexer).
 pub fn detect_install_base_dir() -> Option<PathBuf> {
     detect_install_impl().map(|i| PathBuf::from(i.base_dir))
 }
@@ -293,6 +390,191 @@ fn version_from_sclang_binary(path: &str) -> Option<String> {
         String::from_utf8_lossy(&output.stderr)
     );
     parse_version_from_text(&text)
+}
+
+/// Compile `code` with `sclang` without executing it (class library still loads once).
+pub fn check_sclang_syntax(code: &str) -> String {
+    let Some(inst) = detect_install_impl() else {
+        return "check_sclang_syntax failed: SuperCollider install not detected — run detect_supercollider_install.".to_string();
+    };
+    let Some(ref sclang) = inst.sclang_path else {
+        return "check_sclang_syntax failed: sclang executable not found next to detected install.".to_string();
+    };
+
+    let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_nanos(),
+        Err(_) => 0,
+    };
+    let dir = std::env::temp_dir().join(format!("supercollider-mcp-syntax-{nanos}"));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return format!("check_sclang_syntax failed: temp dir: {e}");
+    }
+    let boot = dir.join("bootstrap.sc");
+    let snippet = dir.join("snippet.sc");
+    if let Err(e) = std::fs::write(&boot, SCLANG_SYNTAX_BOOTSTRAP) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return format!("check_sclang_syntax failed: write bootstrap: {e}");
+    }
+    if let Err(e) = std::fs::write(&snippet, code) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return format!("check_sclang_syntax failed: write snippet: {e}");
+    }
+
+    let output = Command::new(sclang).arg(&boot).arg(&snippet).output();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => return format!("check_sclang_syntax failed: spawn sclang ({sclang}): {e}"),
+    };
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let ok = output.status.success();
+
+    fn tail_lines(s: &str, max: usize) -> String {
+        let lines: Vec<&str> = s.lines().collect();
+        let n = lines.len();
+        let start = n.saturating_sub(max);
+        lines[start..].join("\n")
+    }
+
+    if ok {
+        format!(
+            "sclang syntax: OK\n- sclang={sclang}\n- note: snippet was compile-checked only (not executed). Loading SC class library adds ~0.5–2s overhead per run."
+        )
+    } else {
+        format!(
+            "sclang syntax: ERROR\n- sclang={sclang}\n- exit_code={:?}\n--- stderr (last lines) ---\n{}\n--- stdout (last lines) ---\n{}",
+            output.status.code(),
+            tail_lines(&stderr, 40),
+            tail_lines(&stdout, 20)
+        )
+    }
+}
+
+fn resolve_execute_target(
+    server_pid: Option<u32>,
+    osc_port: Option<u16>,
+) -> Result<(u16, u32), String> {
+    if let Some(port) = osc_port.filter(|&p| p > 0) {
+        let snap = collect_snapshot()?;
+        let pid = snap
+            .servers
+            .iter()
+            .find(|s| s.responding_port == Some(port))
+            .map(|s| s.pid)
+            .or_else(|| snap.servers.first().map(|s| s.pid))
+            .unwrap_or(0);
+        return Ok((port, pid));
+    }
+    let snap = collect_snapshot()?;
+    let srv = match server_pid {
+        Some(pid) => snap
+            .servers
+            .iter()
+            .find(|s| s.pid == pid)
+            .ok_or_else(|| format!("No server process with pid={pid} (scsynth/supernova)."))?,
+        None => snap
+            .servers
+            .iter()
+            .find(|s| s.osc_reachable)
+            .or_else(|| snap.servers.first())
+            .ok_or_else(|| {
+                "No SuperCollider audio server found; boot scsynth/supernova first.".to_string()
+            })?,
+    };
+    let port = srv.responding_port.ok_or_else(|| {
+        format!(
+            "Could not resolve OSC UDP port for pid {} (no /status.reply on probed ports).",
+            srv.pid
+        )
+    })?;
+    Ok((port, srv.pid))
+}
+
+/// Run `code` on the **live** scsynth/supernova using headless `sclang` and `Server.remote` to `127.0.0.1:port`.
+///
+/// **Security:** this is arbitrary code execution with audio side effects — only enable this MCP on trusted hosts.
+pub fn execute_supercollider_code(
+    code: &str,
+    server_pid: Option<u32>,
+    osc_port: Option<u16>,
+) -> String {
+    if code.trim().is_empty() {
+        return "execute_supercollider_code: code is empty.".to_string();
+    }
+
+    let (port, srv_pid) = match resolve_execute_target(server_pid, osc_port) {
+        Ok(x) => x,
+        Err(e) => return format!("execute_supercollider_code failed: {e}"),
+    };
+
+    let Some(inst) = detect_install_impl() else {
+        return "execute_supercollider_code failed: SuperCollider install not detected.".to_string();
+    };
+    let Some(ref sclang) = inst.sclang_path else {
+        return "execute_supercollider_code failed: sclang not found in install.".to_string();
+    };
+
+    let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_nanos(),
+        Err(_) => 0,
+    };
+    let dir = std::env::temp_dir().join(format!("supercollider-mcp-exec-{nanos}"));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return format!("execute_supercollider_code failed: temp dir: {e}");
+    }
+    let boot = dir.join("bootstrap.sc");
+    let snippet = dir.join("user.sc");
+    if let Err(e) = std::fs::write(&boot, SCLANG_REMOTE_EXECUTE_BOOTSTRAP) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return format!("execute_supercollider_code failed: write bootstrap: {e}");
+    }
+    if let Err(e) = std::fs::write(&snippet, code) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return format!("execute_supercollider_code failed: write user.sc: {e}");
+    }
+
+    let port_str = port.to_string();
+    let mut cmd = Command::new(sclang);
+    cmd.arg(&boot).arg(&snippet).arg(&port_str);
+    let output = command_output_with_timeout(&mut cmd, SCLANG_EXECUTE_TIMEOUT);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => {
+            return format!(
+                "execute_supercollider_code failed: {e}\n- sclang={sclang}\n- target_server_pid={srv_pid}\n- osc_udp_port={port}\n- hint: if this timed out, user code may be stuck in an infinite loop, or the server may be unreachable / refusing extra clients (see scsynth maxLogins)."
+            );
+        }
+    };
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let ok = output.status.success();
+
+    fn tail_lines(s: &str, max: usize) -> String {
+        let lines: Vec<&str> = s.lines().collect();
+        let n = lines.len();
+        let start = n.saturating_sub(max);
+        lines[start..].join("\n")
+    }
+
+    if ok {
+        format!(
+            "execute_supercollider_code: OK\n- sclang={sclang}\n- target_server_pid={srv_pid}\n- osc_udp_port={port}\n- note: interpreted via Server.remote(127.0.0.1:{port}). Schedules may outlive this short sclang process.\n--- stdout (tail) ---\n{}",
+            tail_lines(&stdout, 25)
+        )
+    } else {
+        format!(
+            "execute_supercollider_code: ERROR\n- sclang={sclang}\n- target_server_pid={srv_pid}\n- osc_udp_port={port}\n- exit_code={:?}\n--- stderr (tail) ---\n{}\n--- stdout (tail) ---\n{}",
+            output.status.code(),
+            tail_lines(&stderr, 45),
+            tail_lines(&stdout, 25)
+        )
+    }
 }
 
 pub fn get_supercollider_version() -> String {
@@ -369,6 +651,8 @@ fn install_match_for(
         None => "install_binary_missing".to_string(),
     }
 }
+
+// --- One sysinfo pass: candidates, servers, merged OSC probe set ---
 
 fn collect_snapshot_impl() -> ScSnapshot {
     let mut sys = System::new();
@@ -481,12 +765,14 @@ fn collect_snapshot_impl() -> ScSnapshot {
     }
 }
 
+/// Wraps `collect_snapshot_impl` so a `sysinfo` panic becomes an `Err` instead of killing the MCP server.
 fn collect_snapshot() -> Result<ScSnapshot, String> {
     panic::catch_unwind(collect_snapshot_impl).map_err(|_| {
         "internal panic while collecting SuperCollider snapshot (sysinfo/OS)".to_string()
     })
 }
 
+/// Mebibytes for human-readable tool output (1024-based, matches typical task managers).
 pub(crate) fn mib(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0)
 }

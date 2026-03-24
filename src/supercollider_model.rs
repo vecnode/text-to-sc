@@ -1,3 +1,7 @@
+//! Serializable sketch of SuperCollider server / graph state (placeholder until OSC bridge exists).
+//!
+//! MCP tools will eventually populate this from real scsynth data; for now it anchors future API shape.
+
 use serde::{Deserialize, Serialize};
 
 /// High-level representation of the SuperCollider server state.

@@ -1,4 +1,5 @@
-//! Human-readable messages on stderr. For stdio transport, MCP JSON-RPC uses stdout only.
+//! One-shot stderr banners (tool lists, URLs).  
+//! **Important:** with stdio transport, MCP JSON-RPC must stay on **stdout**; all startup hints go here.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -7,7 +8,7 @@ pub fn stdio() {
         "[supercollider-mcp] MCP over stdio (default). JSON-RPC on stdout; logs on stderr. Use --http for Streamable HTTP."
     );
     eprintln!(
-        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs"
+        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, get_docs_index_status, get_mcp_tool_routing_hints, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code"
     );
 }
 
@@ -20,6 +21,6 @@ pub fn streamable_http(addr: SocketAddr) {
         );
     }
     eprintln!(
-        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs · Ctrl+C to stop"
+        "[supercollider-mcp] tools: ping_supercollider, get_servers, discover_supercollider, get_server_status, detect_supercollider_install, get_supercollider_version, get_server_docs, list_server_candidates, get_docs_index_status, get_mcp_tool_routing_hints, refresh_supercollider_docs_index, search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code · Ctrl+C to stop"
     );
 }

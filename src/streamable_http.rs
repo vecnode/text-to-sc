@@ -1,3 +1,7 @@
+//! Streamable HTTP transport for MCP (`/mcp` on Axum).
+//!
+//! Middleware adapts `Accept` headers so clients that omit SSE still get a valid session.
+
 use std::net::SocketAddr;
 
 use anyhow::{Context, Result};

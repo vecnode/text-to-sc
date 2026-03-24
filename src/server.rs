@@ -1,3 +1,6 @@
+//! MCP server surface: tool schemas (`rmcp` macros), `tokio::task::spawn_blocking` wrappers for blocking work,
+//! and `ServerHandler` metadata consumed by clients (e.g. Open WebUI).
+
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -8,12 +11,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{sc_docs, sc_process, supercollider_model::SupercolliderServerState};
 
+/// Root MCP service; holds the generated tool router and placeholder graph state.
 #[derive(Clone)]
 pub struct SupercolliderMcpServer {
     tool_router: ToolRouter<Self>,
     #[allow(dead_code)]
     state: SupercolliderServerState,
-    // TODO: graph tools + OSC will use `state`.
+    // Future: graph / OSC tools will read and update `state`.
 }
 
 impl SupercolliderMcpServer {
@@ -46,6 +50,10 @@ pub struct DocsSearchParams {
     pub query: String,
     /// Maximum results to return (1..12, default 5).
     pub max_results: Option<usize>,
+    /// Response shape: `text` (default) or `json` (structured hits and citations).
+    pub output: Option<String>,
+    /// Docs source: `local` (default) or `auto`. `web` is not supported (offline-first).
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -54,9 +62,24 @@ pub struct DocsAnswerParams {
     pub question: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SclangSyntaxParams {
+    /// SuperCollider language source to compile-check (not executed; no audio).
+    pub code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ExecuteSupercolliderParams {
+    /// sclang source to run against the live audio server (e.g. `{ SinOsc.ar }.play;` or `Synth(\\default)`).
+    pub code: String,
+    /// Target `scsynth` / `supernova` PID from `get_servers`. Omit to use first OSC-reachable server.
+    pub server_pid: Option<u32>,
+    /// Override UDP port scsynth listens on (e.g. 57110). Omit to use PID / auto detection.
+    pub osc_port: Option<u16>,
+}
+
 #[tool_router]
 impl SupercolliderMcpServer {
-    /// Simple ping tool that will later check connectivity with SuperCollider.
     #[tool(
         description = "Quick SuperCollider health check: scans scsynth/supernova/sclang processes, probes OSC /status on likely ports, and reports install detection."
     )]
@@ -235,7 +258,7 @@ impl SupercolliderMcpServer {
     }
 
     #[tool(
-        description = "Search local SuperCollider docs with ranked snippets and citations."
+        description = "Search local SuperCollider docs with ranked snippets and citations. Set output=json for structured machine-readable hits. source=web is unsupported (offline-first)."
     )]
     async fn search_supercollider_docs(
         &self,
@@ -244,8 +267,15 @@ impl SupercolliderMcpServer {
         eprintln!("[supercollider-mcp] tool start: search_supercollider_docs params={params:?}");
         let query = params.query;
         let max_results = params.max_results.unwrap_or(5);
+        let output = params.output.unwrap_or_else(|| "text".to_string());
+        let source_owned = params.source;
         let report = match tokio::task::spawn_blocking(move || {
-            sc_docs::search_supercollider_docs(&query, max_results)
+            sc_docs::search_supercollider_docs(
+                &query,
+                max_results,
+                &output,
+                source_owned.as_deref(),
+            )
         })
         .await
         {
@@ -288,6 +318,34 @@ impl SupercolliderMcpServer {
     }
 
     #[tool(
+        description = "Report SuperCollider docs index status: resolved Help/HelpSource root, on-disk doc file count, and whether the in-memory index is loaded (without building it)."
+    )]
+    async fn get_docs_index_status(&self, Parameters(_p): Parameters<EmptyParams>) -> String {
+        eprintln!("[supercollider-mcp] tool start: get_docs_index_status");
+        let report = match tokio::task::spawn_blocking(sc_docs::get_docs_index_status).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[supercollider-mcp] tool error: get_docs_index_status — spawn_blocking join failed: {e}"
+                );
+                return format!("get_docs_index_status failed: {e}");
+            }
+        };
+        eprintln!("[supercollider-mcp] tool ok: get_docs_index_status — finished successfully");
+        report
+    }
+
+    #[tool(
+        description = "Return a concise routing table: which MCP tool to use for server health, version, docs index, search, and grounded Q&A (offline-first)."
+    )]
+    async fn get_mcp_tool_routing_hints(&self, Parameters(_p): Parameters<EmptyParams>) -> String {
+        eprintln!("[supercollider-mcp] tool start: get_mcp_tool_routing_hints");
+        let report = sc_docs::get_mcp_tool_routing_hints();
+        eprintln!("[supercollider-mcp] tool ok: get_mcp_tool_routing_hints — finished successfully");
+        report
+    }
+
+    #[tool(
         description = "Get detected SuperCollider version from install path and sclang -v (when available), plus running binary paths/version hints."
     )]
     async fn get_supercollider_version(&self, Parameters(_p): Parameters<EmptyParams>) -> String {
@@ -304,13 +362,65 @@ impl SupercolliderMcpServer {
         eprintln!("[supercollider-mcp] tool ok: get_supercollider_version — finished successfully");
         report
     }
+
+    #[tool(
+        description = "Compile-check sclang source with the installed sclang (snippet only, not executed; class library still loads — ~0.5–2s typical)."
+    )]
+    async fn check_sclang_syntax(&self, Parameters(params): Parameters<SclangSyntaxParams>) -> String {
+        eprintln!("[supercollider-mcp] tool start: check_sclang_syntax ({} bytes)", params.code.len());
+        let code = params.code;
+        let report = match tokio::task::spawn_blocking(move || sc_process::check_sclang_syntax(&code)).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[supercollider-mcp] tool error: check_sclang_syntax — spawn_blocking join failed: {e}"
+                );
+                return format!("check_sclang_syntax failed: {e}");
+            }
+        };
+        eprintln!("[supercollider-mcp] tool ok: check_sclang_syntax — finished successfully");
+        report
+    }
+
+    #[tool(
+        description = "SECURITY: runs arbitrary sclang against your live scsynth (Server.remote + interpret). Prefer check_sclang_syntax first. Pass server_pid/osc_port from get_servers or omit for auto-target. Trust this MCP only on your own machine."
+    )]
+    async fn execute_supercollider_code(
+        &self,
+        Parameters(params): Parameters<ExecuteSupercolliderParams>,
+    ) -> String {
+        eprintln!(
+            "[supercollider-mcp] tool start: execute_supercollider_code ({} bytes) pid={:?} port={:?}",
+            params.code.len(),
+            params.server_pid,
+            params.osc_port
+        );
+        let code = params.code;
+        let server_pid = params.server_pid;
+        let osc_port = params.osc_port;
+        let report = match tokio::task::spawn_blocking(move || {
+            sc_process::execute_supercollider_code(&code, server_pid, osc_port)
+        })
+        .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[supercollider-mcp] tool error: execute_supercollider_code — spawn_blocking join failed: {e}"
+                );
+                return format!("execute_supercollider_code failed: {e}");
+            }
+        };
+        eprintln!("[supercollider-mcp] tool ok: execute_supercollider_code — finished");
+        report
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for SupercolliderMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Use ping_supercollider for quick health; get_servers for detailed server stats; discover_supercollider for full JSON discovery; get_server_status for one PID; detect_supercollider_install/get_supercollider_version/get_server_docs for install/version/docs paths; refresh_supercollider_docs_index/search_supercollider_docs/answer_supercollider_docs for grounded docs retrieval and QA.".to_string(),
+            "Use ping_supercollider for quick health; get_servers for detailed server stats; discover_supercollider for full JSON discovery; get_server_status for one PID; detect_supercollider_install/get_supercollider_version/get_server_docs for install/version/docs paths; get_docs_index_status before heavy docs use; refresh_supercollider_docs_index/search_supercollider_docs (output=json optional)/answer_supercollider_docs for grounded local docs; check_sclang_syntax to compile-check sclang; execute_supercollider_code to run sclang on the live server (trusted only); get_mcp_tool_routing_hints for intent→tool mapping.".to_string(),
         )
     }
 }

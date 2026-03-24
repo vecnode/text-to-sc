@@ -1,3 +1,7 @@
+//! Binary entry point: MCP over **stdio** (default) or **Streamable HTTP** (`--http`).
+//!
+//! Logging for humans belongs on stderr; stdio transport keeps JSON-RPC on stdout only.
+
 use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
