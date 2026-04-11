@@ -154,12 +154,41 @@ def build_server(host: str = "127.0.0.1", port: int = 8000, streamable_http_path
         )
 
     @mcp.tool()
+    def get_audio_diagnostics(
+        server_pid: Annotated[Optional[int], "PID of the target scsynth/supernova process; omit to auto-detect."] = None,
+        osc_port: Annotated[Optional[int], "OSC UDP port of the target server (e.g. 57110); omit to auto-detect."] = None,
+    ) -> str:
+        """TRUSTED HOST ONLY: Diagnose 'server is up but no sound' issues. Returns current control target, /status.reply metrics, and tracked scsynth log tail when available."""
+        return sc_process.get_audio_diagnostics(server_pid=server_pid, osc_port=osc_port)
+
+    @mcp.tool()
     def start_supercollider_server(
         port: Annotated[int, "UDP port for the scsynth server to listen on (default 57110)."] = 57110,
         use_supernova: Annotated[bool, "Boot supernova instead of scsynth if available."] = False,
     ) -> str:
         """TRUSTED HOST ONLY: Boot scsynth (or supernova) directly from the detected SC install. Use this when get_servers shows no running server. Waits up to 25s for OSC readiness."""
         return sc_process.start_supercollider_server(port=port, use_supernova=use_supernova)
+
+    @mcp.tool()
+    def set_supercollider_server_active(
+        server_pid: Annotated[Optional[int], "PID to mark as active control target; omit to auto-select running target."] = None,
+        osc_port: Annotated[Optional[int], "OSC UDP port to mark as active target; omit to auto-select."] = None,
+    ) -> str:
+        """Ensure the server is ACTIVE for MCP control. If no server is running, starts one. This sets GLOBAL_SUPERCOLIDER_APP_PID and GLOBAL_SUPERCOLIDER_ACTIVE=true."""
+        return sc_process.set_supercollider_server_active(server_pid=server_pid, osc_port=osc_port)
+
+    @mcp.tool()
+    def set_supercollider_server_inactive() -> str:
+        """Mark MCP control state as INACTIVE without killing the OS process. Clears GLOBAL_SUPERCOLIDER_APP_PID and sets GLOBAL_SUPERCOLIDER_ACTIVE=false."""
+        return sc_process.set_supercollider_server_inactive()
+
+    @mcp.tool()
+    def turn_down_supercollider_server(
+        server_pid: Annotated[Optional[int], "PID of server to stop; omit to use active target."] = None,
+        osc_port: Annotated[Optional[int], "OSC UDP port of server to stop; omit to use active target."] = None,
+    ) -> str:
+        """Turn server down (stop it) and mark MCP state INACTIVE."""
+        return sc_process.turn_down_supercollider_server(server_pid=server_pid, osc_port=osc_port)
 
     @mcp.tool()
     def stop_supercollider_synths(

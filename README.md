@@ -17,7 +17,12 @@ python -m supercollider_mcp_py.main --http --bind 0.0.0.0:8787
 # Previous Rust MCP Tester
 cargo run -- --http
 
+# To test tools (preconfigured: Streamable HTTP + URL)
+npx -y @modelcontextprotocol/inspector --transport http --server-url http://127.0.0.1:8787/mcp
 
+start_supercollider_server
+play_test_tone
+get_audio_diagnostics
 ```
 
 
@@ -48,7 +53,11 @@ cargo run -- --http
 **Execution** *(trusted host only)*
 - `check_sclang_syntax(code)` — compile-check without executing (~0.5–2s class library load)
 - `start_supercollider_server(port?, use_supernova?)` — boot scsynth/supernova directly from the detected install; no IDE needed
-- `play_test_tone(freq_hz?, amp?, duration_s?, server_pid?, osc_port?)` — deterministic short beep to verify actual audio output path
+- `set_supercollider_server_active(server_pid?, osc_port?)` — ensure server is ACTIVE for MCP control; starts one if none is running
+- `set_supercollider_server_inactive()` — mark server control state INACTIVE without killing the process
+- `turn_down_supercollider_server(server_pid?, osc_port?)` — stop the server and mark control state INACTIVE
+- `play_test_tone(freq_hz?, amp?, duration_s?, server_pid?, osc_port?)` — deterministic short beep to verify actual audio output path (auto-loads `mcpTone` SynthDef if needed)
+- `get_audio_diagnostics(server_pid?, osc_port?)` — inspect target PID/port, `/status.reply` metrics, and scsynth log tail (if launched by MCP)
 - `execute_supercollider_code(code, server_pid?, osc_port?)` — run sclang against live `scsynth`; e.g. `{ SinOsc.ar(440, 0, 0.3) }.play`
 - `stop_supercollider_synths(server_pid?, osc_port?)` — `Server.default.freeAll` (silence all synths)
 - `quit_supercollider_server(server_pid?, osc_port?)` — send OSC `/quit` to stop the server process
@@ -58,11 +67,14 @@ Headless behavior notes:
 - This MCP talks to `scsynth` and runs `sclang` headless; the SuperCollider IDE window will not "show" code execution.
 - Avoid `s.waitForBoot`, `s.boot`, or top-level `s.sleep` in MCP snippets.
 - Prefer: `start_supercollider_server()` -> `play_test_tone()` -> `execute_supercollider_code(...)`.
+- If no sound: run `get_audio_diagnostics()` immediately after `play_test_tone()`.
 
 Control target tracking:
 - MCP tracks the active target as `GLOBAL_SUPERCOLIDER_APP_PID`.
+- MCP tracks whether control is on/off via `GLOBAL_SUPERCOLIDER_ACTIVE`.
 - If a server is already running, `start_supercollider_server` reuses it instead of spawning another.
 - If no server is running, it starts one and sets `GLOBAL_SUPERCOLIDER_APP_PID` to that PID.
+- Health/status checks auto-adopt a reachable server as ACTIVE when found.
 - `execute` / `stop` / `quit` / `reboot` prefer explicit args first, then `GLOBAL_SUPERCOLIDER_APP_PID`.
 
 > execute/stop/quit/reboot affect live audio processes — enable only for local trusted sessions.
