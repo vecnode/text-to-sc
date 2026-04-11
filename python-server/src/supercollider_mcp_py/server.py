@@ -137,6 +137,23 @@ def build_server(host: str = "127.0.0.1", port: int = 8000, streamable_http_path
         )
 
     @mcp.tool()
+    def play_test_tone(
+        freq_hz: Annotated[float, "Tone frequency in Hz (default 440)."] = 440.0,
+        amp: Annotated[float, "Amplitude 0..1 (default 0.15)."] = 0.15,
+        duration_s: Annotated[float, "Tone duration in seconds (default 1.0)."] = 1.0,
+        server_pid: Annotated[Optional[int], "PID of the target scsynth/supernova process; omit to auto-detect."] = None,
+        osc_port: Annotated[Optional[int], "OSC UDP port of the target server (e.g. 57110); omit to auto-detect."] = None,
+    ) -> str:
+        """TRUSTED HOST ONLY: Play a short deterministic sine test tone on the live server. Use this to verify that audio output actually works before running complex snippets."""
+        return sc_process.play_test_tone(
+            freq_hz=freq_hz,
+            amp=amp,
+            duration_s=duration_s,
+            server_pid=server_pid,
+            osc_port=osc_port,
+        )
+
+    @mcp.tool()
     def start_supercollider_server(
         port: Annotated[int, "UDP port for the scsynth server to listen on (default 57110)."] = 57110,
         use_supernova: Annotated[bool, "Boot supernova instead of scsynth if available."] = False,

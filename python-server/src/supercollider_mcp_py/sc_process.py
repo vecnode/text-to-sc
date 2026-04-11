@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import shutil
 import socket
@@ -20,6 +21,10 @@ SCLANG_EXECUTE_TIMEOUT_S = 120
 SERVER_OSC_CONTROL_POLL_S = 0.2
 SERVER_QUIT_WAIT_MAX_S = 15
 SERVER_BOOT_WAIT_MAX_S = 25
+
+# Tracks which SuperCollider server PID this MCP is actively controlling.
+GLOBAL_SUPERCOLIDER_APP_PID: int | None = None
+_GLOBAL_SUPERCOLIDER_APP_PID_LOCK = threading.Lock()
 
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 SCLANG_SYNTAX_BOOTSTRAP = (ASSETS_DIR / "sclang_syntax_bootstrap.sc").read_text(encoding="utf-8")
@@ -104,6 +109,50 @@ def _osc_status_packet() -> bytes:
 
 def _osc_quit_packet() -> bytes:
     return _osc_padded_string("/quit") + _osc_padded_string(",")
+
+
+def _osc_int32(v: int) -> bytes:
+    return int(v).to_bytes(4, byteorder="big", signed=True)
+
+
+def _osc_float32(v: float) -> bytes:
+    import struct
+
+    return struct.pack(">f", float(v))
+
+
+def _osc_message(address: str, args: list[object]) -> bytes:
+    tags = [","]
+    payload = bytearray()
+    for arg in args:
+        if isinstance(arg, bool):
+            tags.append("i")
+            payload.extend(_osc_int32(1 if arg else 0))
+        elif isinstance(arg, int):
+            tags.append("i")
+            payload.extend(_osc_int32(arg))
+        elif isinstance(arg, float):
+            tags.append("f")
+            payload.extend(_osc_float32(arg))
+        elif isinstance(arg, str):
+            tags.append("s")
+            payload.extend(_osc_padded_string(arg))
+        else:
+            raise ValueError(f"unsupported OSC arg type: {type(arg)!r}")
+    return _osc_padded_string(address) + _osc_padded_string("".join(tags)) + bytes(payload)
+
+
+def send_osc_message(port: int, address: str, args: list[object]) -> bool:
+    try:
+        packet = _osc_message(address, args)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.5)
+            sock.sendto(packet, ("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    except ValueError:
+        return False
 
 
 def osc_status_alive(port: int) -> bool:
@@ -342,6 +391,17 @@ def wait_server_responding(port: int) -> bool:
     return False
 
 
+def get_global_supercolider_app_pid() -> int | None:
+    with _GLOBAL_SUPERCOLIDER_APP_PID_LOCK:
+        return GLOBAL_SUPERCOLIDER_APP_PID
+
+
+def set_global_supercolider_app_pid(pid: int | None) -> None:
+    global GLOBAL_SUPERCOLIDER_APP_PID
+    with _GLOBAL_SUPERCOLIDER_APP_PID_LOCK:
+        GLOBAL_SUPERCOLIDER_APP_PID = pid
+
+
 def pick_server_exe(srv: ScServerInstance, install: ScInstallInfo | None) -> Path | None:
     if srv.exe_path and Path(srv.exe_path).is_file():
         return Path(srv.exe_path)
@@ -512,6 +572,7 @@ def probe(message: str | None = None) -> str:
 
     server_alive = any(s.osc_reachable for s in snapshot.servers)
     lines.append(f"- server_alive={server_alive}")
+    lines.append(f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}")
 
     if snapshot.install:
         lines.append(f"- install: detected at {snapshot.install.base_dir}")
@@ -532,8 +593,11 @@ def get_servers() -> str:
     except Exception as exc:
         return f"get_servers failed unexpectedly. Check supercollider-mcp stderr.\nReason: {exc}"
 
+    tracked_pid = get_global_supercolider_app_pid()
+
     if not snapshot.servers:
         lines = ["No SuperCollider server process found (scsynth/supernova)."]
+        lines.append(f"- GLOBAL_SUPERCOLIDER_APP_PID={tracked_pid}")
         if snapshot.install:
             lines.append(f"- install detected at {snapshot.install.base_dir}")
             lines.append("- action: call start_supercollider_server() to boot scsynth directly (no IDE needed).")
@@ -541,7 +605,11 @@ def get_servers() -> str:
             lines.append("- action: call detect_supercollider_install() first — no SC install found.")
         return "\n".join(lines)
 
-    lines = ["SuperCollider server process(es) on this machine:", ""]
+    lines = [
+        "SuperCollider server process(es) on this machine:",
+        f"- GLOBAL_SUPERCOLIDER_APP_PID={tracked_pid}",
+        "",
+    ]
     for row in snapshot.servers:
         line = (
             f"pid={row.pid} name={row.name} rss={mib(row.rss_bytes):.1f} MiB "
@@ -574,6 +642,7 @@ def discover_supercollider() -> str:
     )
     payload = {
         "logical_cpus": snapshot.logical_cpus,
+        "GLOBAL_SUPERCOLIDER_APP_PID": get_global_supercolider_app_pid(),
         "install": asdict(snapshot.install) if snapshot.install else None,
         "servers": [asdict(s) for s in snapshot.servers],
         "candidates": [asdict(c) for c in snapshot.candidates],
@@ -602,16 +671,20 @@ def get_server_status(pid: int | None = None) -> str:
             return (
                 "No SuperCollider server process currently running (scsynth/supernova).\n"
                 f"- install detected at {install.base_dir}\n"
+                f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
                 "- action: call start_supercollider_server() to boot scsynth directly."
             )
         return (
             "No SuperCollider server process currently running (scsynth/supernova).\n"
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
             "- action: call detect_supercollider_install() — no SC install found yet."
         )
 
+    set_global_supercolider_app_pid(target.pid)
     return "\n".join(
         [
             f"Server status for pid={target.pid}",
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}",
             f"- name={target.name}",
             f"- exe_path={target.exe_path or '<unknown>'}",
             f"- osc_reachable={target.osc_reachable}",
@@ -721,6 +794,7 @@ def resolve_control_target(server_pid: int | None, osc_port: int | None) -> tupl
             srv = snapshot.servers[0]
         if not srv:
             raise ValueError("No SuperCollider audio server found; boot scsynth/supernova first.")
+        set_global_supercolider_app_pid(srv.pid)
         return srv, osc_port
 
     if server_pid is not None:
@@ -728,7 +802,10 @@ def resolve_control_target(server_pid: int | None, osc_port: int | None) -> tupl
         if not srv:
             raise ValueError(f"No server process with pid={server_pid} (scsynth/supernova).")
     else:
-        srv = next((s for s in snapshot.servers if s.osc_reachable), None)
+        global_pid = get_global_supercolider_app_pid()
+        srv = next((s for s in snapshot.servers if global_pid is not None and s.pid == global_pid), None)
+        if srv is None:
+            srv = next((s for s in snapshot.servers if s.osc_reachable), None)
         if srv is None and snapshot.servers:
             srv = snapshot.servers[0]
         if not srv:
@@ -738,7 +815,22 @@ def resolve_control_target(server_pid: int | None, osc_port: int | None) -> tupl
         raise ValueError(
             f"Could not resolve OSC UDP port for pid {srv.pid} (no /status.reply on probed ports)."
         )
+    set_global_supercolider_app_pid(srv.pid)
     return srv, srv.responding_port
+
+
+def _execution_warnings_for_code(code: str) -> list[str]:
+    text = code.lower()
+    warnings: list[str] = []
+    if "waitforboot" in text:
+        warnings.append("avoid s.waitForBoot in MCP mode; the target server is already expected to be running")
+    if ".sleep(" in text:
+        warnings.append("avoid s.sleep unless you create a Routine/Task; plain top-level sleep is often ignored or errors")
+    if "s.boot" in text or "server.default.boot" in text:
+        warnings.append("avoid booting from snippet; use start_supercollider_server() so PID tracking stays consistent")
+    if "s.quit" in text or "server.default.quit" in text:
+        warnings.append("snippet asks to quit server; prefer quit_supercollider_server() for tracked shutdown")
+    return warnings
 
 
 def execute_supercollider_code(code: str, server_pid: int | None = None, osc_port: int | None = None) -> str:
@@ -749,6 +841,8 @@ def execute_supercollider_code(code: str, server_pid: int | None = None, osc_por
         srv, port = resolve_control_target(server_pid, osc_port)
     except Exception as exc:
         return f"execute_supercollider_code failed: {exc}"
+
+    code_warnings = _execution_warnings_for_code(code)
 
     install = detect_install_impl()
     if not install:
@@ -768,32 +862,57 @@ def execute_supercollider_code(code: str, server_pid: int | None = None, osc_por
             SCLANG_EXECUTE_TIMEOUT_S,
         )
         if isinstance(result, str):
+            warnings_block = ""
+            if code_warnings:
+                warnings_block = "\n- warnings:\n  - " + "\n  - ".join(code_warnings)
             return (
                 f"execute_supercollider_code failed: {result}\n"
                 f"- sclang={install.sclang_path}\n"
                 f"- target_server_pid={srv.pid}\n"
+                f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
                 f"- osc_udp_port={port}\n"
+                f"{warnings_block}"
                 "- hint: if this timed out, user code may be stuck in an infinite loop, "
                 "or the server may be unreachable / refusing extra clients (see scsynth maxLogins)."
             )
 
         return_code, stdout, stderr = result
-        if return_code == 0:
+        output_joined = f"{stdout}\n{stderr}".lower()
+        has_sc_error_markers = (
+            "error:" in output_joined
+            or "command line parse failed" in output_joined
+            or "warning: server 'mcpexec' not running." in output_joined
+            or "exception" in output_joined
+        )
+
+        if return_code == 0 and not has_sc_error_markers:
+            warnings_block = ""
+            if code_warnings:
+                warnings_block = "\n- warnings:\n  - " + "\n  - ".join(code_warnings)
             return (
                 "execute_supercollider_code: OK\n"
                 f"- sclang={install.sclang_path}\n"
                 f"- target_server_pid={srv.pid}\n"
+                f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
                 f"- osc_udp_port={port}\n"
+                f"{warnings_block}"
                 f"- note: interpreted via Server.remote(127.0.0.1:{port}). "
                 "Schedules may outlive this short sclang process.\n"
                 "--- stdout (tail) ---\n"
                 f"{_tail_lines(stdout, 25)}"
             )
+        warnings_block = ""
+        if code_warnings:
+            warnings_block = "\n- warnings:\n  - " + "\n  - ".join(code_warnings)
+        marker_note = "- detected_sc_errors=true\n" if has_sc_error_markers else ""
         return (
             "execute_supercollider_code: ERROR\n"
             f"- sclang={install.sclang_path}\n"
             f"- target_server_pid={srv.pid}\n"
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
             f"- osc_udp_port={port}\n"
+            f"{warnings_block}"
+            f"{marker_note}"
             f"- exit_code={return_code}\n"
             "--- stderr (tail) ---\n"
             f"{_tail_lines(stderr, 45)}\n"
@@ -808,6 +927,31 @@ def execute_supercollider_code(code: str, server_pid: int | None = None, osc_por
 
 def start_supercollider_server(port: int = 57110, use_supernova: bool = False) -> str:
     """Spawn scsynth (or supernova) from the detected install and wait for OSC response."""
+    # If any reachable server is already running, adopt it instead of spawning another one.
+    try:
+        snapshot = collect_snapshot()
+    except Exception:
+        snapshot = None
+
+    if snapshot:
+        running = [s for s in snapshot.servers if s.osc_reachable]
+        if running:
+            chosen = next((s for s in running if s.responding_port == port), None)
+            if chosen is None:
+                global_pid = get_global_supercolider_app_pid()
+                chosen = next((s for s in running if global_pid is not None and s.pid == global_pid), None)
+            if chosen is None:
+                chosen = running[0]
+            set_global_supercolider_app_pid(chosen.pid)
+            return (
+                "start_supercollider_server: already running (no spawn)\n"
+                f"- GLOBAL_SUPERCOLIDER_APP_PID={chosen.pid}\n"
+                f"- pid={chosen.pid}\n"
+                f"- name={chosen.name}\n"
+                f"- osc_udp_port={chosen.responding_port}\n"
+                "- note: reusing existing active server process."
+            )
+
     install = detect_install_impl()
     if not install:
         return (
@@ -831,9 +975,14 @@ def start_supercollider_server(port: int = 57110, use_supernova: bool = False) -
         )
 
     if osc_status_alive(port):
+        post = collect_snapshot()
+        existing = next((s for s in post.servers if s.responding_port == port), None)
+        if existing is not None:
+            set_global_supercolider_app_pid(existing.pid)
         return (
             f"start_supercollider_server: server already running on port {port} "
             "(OSC /status.reply received). No action taken.\n"
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
             "- hint: call get_servers for full process info, or execute_supercollider_code to play audio."
         )
 
@@ -848,12 +997,20 @@ def start_supercollider_server(port: int = 57110, use_supernova: bool = False) -
         return f"start_supercollider_server failed: could not spawn {exe} -u {port}: {exc}"
 
     if wait_server_responding(port):
+        try:
+            post = collect_snapshot()
+            chosen = next((s for s in post.servers if s.responding_port == port), None)
+            if chosen is not None:
+                set_global_supercolider_app_pid(chosen.pid)
+        except Exception:
+            pass
         return (
             "start_supercollider_server: OK\n"
             f"- kind={kind}\n"
             f"- exe={exe}\n"
             f"- osc_udp_port={port}\n"
             f"- spawned_pid={new_pid}\n"
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
             "- /status.reply: yes (server is accepting OSC)\n"
             "- next: call execute_supercollider_code to run sclang/audio on the live server."
         )
@@ -864,8 +1021,62 @@ def start_supercollider_server(port: int = 57110, use_supernova: bool = False) -
         f"- exe={exe}\n"
         f"- osc_udp_port={port}\n"
         f"- spawned_pid={new_pid}\n"
+        f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
         f"- /status.reply: no within {SERVER_BOOT_WAIT_MAX_S}s (process spawned but not yet responding)\n"
         "- call ping_supercollider or get_server_status to re-check readiness."
+    )
+
+
+def play_test_tone(
+    freq_hz: float = 440.0,
+    amp: float = 0.15,
+    duration_s: float = 1.0,
+    server_pid: int | None = None,
+    osc_port: int | None = None,
+) -> str:
+    if freq_hz <= 0:
+        return "play_test_tone failed: freq_hz must be > 0."
+    if not (0 < amp <= 1.0):
+        return "play_test_tone failed: amp must be in (0, 1]."
+    if duration_s <= 0:
+        return "play_test_tone failed: duration_s must be > 0."
+
+    try:
+        srv, port = resolve_control_target(server_pid, osc_port)
+    except Exception as exc:
+        return f"play_test_tone failed: {exc}"
+
+    node_id = random.randint(20000, 39999)
+
+    # /s_new default, node_id, addAction=0, target=1, freq, amp
+    ok_new = send_osc_message(
+        port,
+        "/s_new",
+        ["default", node_id, 0, 1, "freq", float(freq_hz), "amp", float(amp)],
+    )
+    if not ok_new:
+        return (
+            "play_test_tone failed: could not send OSC /s_new to target server.\n"
+            f"- target_server_pid={srv.pid}\n"
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
+            f"- osc_udp_port={port}"
+        )
+
+    # Let it sound, then free explicitly (works even if default synth ignores gate semantics).
+    time.sleep(duration_s)
+    send_osc_message(port, "/n_free", [node_id])
+
+    return (
+        "play_test_tone: OK\n"
+        "- mode=direct_osc\n"
+        f"- target_server_pid={srv.pid}\n"
+        f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
+        f"- osc_udp_port={port}\n"
+        f"- node_id={node_id}\n"
+        f"- freq_hz={freq_hz}\n"
+        f"- amp={amp}\n"
+        f"- duration_s={duration_s}\n"
+        "- note: this talks directly to scsynth over OSC; IDE window state may not change."
     )
 
 
@@ -897,12 +1108,15 @@ def quit_supercollider_server(server_pid: int | None = None, osc_port: int | Non
         return f"quit_supercollider_server failed: UDP send /quit to 127.0.0.1:{port} failed"
 
     gone = wait_process_gone(srv.pid)
+    if gone and get_global_supercolider_app_pid() == srv.pid:
+        set_global_supercolider_app_pid(None)
     status = "OK" if gone else "PARTIAL (PID still alive or still exiting; check get_servers)"
     return (
         f"quit_supercollider_server: {status}\n"
         f"- sent OSC /quit to 127.0.0.1:{port}\n"
         f"- previous_pid={srv.pid}\n"
         f"- process_exited={gone}\n"
+        f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
         "- note: call start_supercollider_server() to boot a fresh scsynth, "
         "or reboot_supercollider_server() if you want /quit + respawn in one step."
     )
@@ -939,12 +1153,14 @@ def reboot_supercollider_server(server_pid: int | None = None, osc_port: int | N
         return f"reboot_supercollider_server failed: spawn {exe} -u {port}: {exc}"
 
     if wait_server_responding(port):
+        set_global_supercolider_app_pid(new_id)
         return (
             "reboot_supercollider_server: OK\n"
             f"- exe={exe}\n"
             f"- osc_udp_port={port}\n"
             f"- previous_pid={srv.pid}\n"
             f"- spawned_pid={new_id}\n"
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
             "- /status.reply: yes\n"
             "- note: spawned with minimal args (-u <port>). Call execute_supercollider_code to play audio."
         )

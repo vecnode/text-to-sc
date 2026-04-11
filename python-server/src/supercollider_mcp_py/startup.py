@@ -10,7 +10,7 @@ TOOLS_BANNER = (
     "get_supercollider_version, get_server_docs, list_server_candidates, "
     "get_docs_index_status, get_mcp_tool_routing_hints, "
     "refresh_supercollider_docs_index, search_supercollider_docs, "
-    "answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code, "
+    "answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code, play_test_tone, "
     "start_supercollider_server, stop_supercollider_synths, "
     "quit_supercollider_server, reboot_supercollider_server"
 )
