@@ -11,6 +11,7 @@ TOOLS_BANNER = (
     "get_docs_index_status, get_mcp_tool_routing_hints, "
     "refresh_supercollider_docs_index, search_supercollider_docs, "
     "answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code, play_test_tone, get_audio_diagnostics, "
+    "get_audio_cards_raw_info, get_audio_endpoints_raw_info, get_audio_stack_report, "
     "start_supercollider_server, set_supercollider_server_active, set_supercollider_server_inactive, "
     "turn_down_supercollider_server, stop_supercollider_synths, "
     "quit_supercollider_server, reboot_supercollider_server"

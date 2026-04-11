@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import ctypes
 import os
+import platform
 import random
 import re
 import shutil
@@ -13,6 +15,11 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+
+try:
+    import winreg  # type: ignore
+except Exception:
+    winreg = None  # type: ignore[assignment]
 
 import psutil
 
@@ -552,6 +559,192 @@ def _tail_file(path: str, max_lines: int = 40) -> str:
     except Exception as exc:
         return f"<failed to read log: {exc}>"
     return _tail_lines(text, max_lines)
+
+
+def _run_powershell_json(script: str) -> list[dict[str, object]]:
+    cmd = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    if isinstance(data, list):
+        return [d for d in data if isinstance(d, dict)]
+    if isinstance(data, dict):
+        return [data]
+    return []
+
+
+def _get_sound_mapper_defaults() -> dict[str, str]:
+    out: dict[str, str] = {}
+    if winreg is None:
+        return out
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Multimedia\Sound Mapper") as key:
+            for value_name in ("Playback", "Record"):
+                try:
+                    value, _ = winreg.QueryValueEx(key, value_name)
+                    out[value_name.lower()] = str(value)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def _get_winmm_wave_caps() -> dict[str, list[dict[str, object]]]:
+    if os.name != "nt":
+        return {"wave_out": [], "wave_in": []}
+
+    class WAVEOUTCAPSW(ctypes.Structure):
+        _fields_ = [
+            ("wMid", ctypes.c_ushort),
+            ("wPid", ctypes.c_ushort),
+            ("vDriverVersion", ctypes.c_uint),
+            ("szPname", ctypes.c_wchar * 32),
+            ("dwFormats", ctypes.c_uint),
+            ("wChannels", ctypes.c_ushort),
+            ("wReserved1", ctypes.c_ushort),
+            ("dwSupport", ctypes.c_uint),
+        ]
+
+    class WAVEINCAPSW(ctypes.Structure):
+        _fields_ = [
+            ("wMid", ctypes.c_ushort),
+            ("wPid", ctypes.c_ushort),
+            ("vDriverVersion", ctypes.c_uint),
+            ("szPname", ctypes.c_wchar * 32),
+            ("dwFormats", ctypes.c_uint),
+            ("wChannels", ctypes.c_ushort),
+            ("wReserved1", ctypes.c_ushort),
+        ]
+
+    wave_out: list[dict[str, object]] = []
+    wave_in: list[dict[str, object]] = []
+    try:
+        winmm = ctypes.windll.winmm  # type: ignore[attr-defined]
+    except Exception:
+        return {"wave_out": wave_out, "wave_in": wave_in}
+
+    try:
+        out_count = int(winmm.waveOutGetNumDevs())
+    except Exception:
+        out_count = 0
+    for i in range(out_count):
+        caps = WAVEOUTCAPSW()
+        try:
+            mmres = int(winmm.waveOutGetDevCapsW(i, ctypes.byref(caps), ctypes.sizeof(caps)))
+        except Exception:
+            mmres = -1
+        if mmres == 0:
+            wave_out.append(
+                {
+                    "id": i,
+                    "name": caps.szPname,
+                    "channels": int(caps.wChannels),
+                    "formats_mask": int(caps.dwFormats),
+                    "support_mask": int(caps.dwSupport),
+                    "mid": int(caps.wMid),
+                    "pid": int(caps.wPid),
+                    "driver_version": int(caps.vDriverVersion),
+                }
+            )
+
+    try:
+        in_count = int(winmm.waveInGetNumDevs())
+    except Exception:
+        in_count = 0
+    for i in range(in_count):
+        caps = WAVEINCAPSW()
+        try:
+            mmres = int(winmm.waveInGetDevCapsW(i, ctypes.byref(caps), ctypes.sizeof(caps)))
+        except Exception:
+            mmres = -1
+        if mmres == 0:
+            wave_in.append(
+                {
+                    "id": i,
+                    "name": caps.szPname,
+                    "channels": int(caps.wChannels),
+                    "formats_mask": int(caps.dwFormats),
+                    "mid": int(caps.wMid),
+                    "pid": int(caps.wPid),
+                    "driver_version": int(caps.vDriverVersion),
+                }
+            )
+
+    return {"wave_out": wave_out, "wave_in": wave_in}
+
+
+def get_audio_cards_raw_info() -> str:
+    script = (
+        "Get-CimInstance Win32_SoundDevice | "
+        "Select-Object Name,Manufacturer,Status,PNPDeviceID,ProductName,DeviceID | "
+        "ConvertTo-Json -Depth 4"
+    )
+    rows = _run_powershell_json(script)
+    payload = {
+        "host_platform": platform.platform(),
+        "os_name": os.name,
+        "count": len(rows),
+        "sound_devices": rows,
+    }
+    return json.dumps(payload, indent=2)
+
+
+def get_audio_endpoints_raw_info() -> str:
+    # MEDIA class includes playback/capture endpoints and drivers visible to PnP.
+    script = (
+        "Get-CimInstance Win32_PnPEntity -Filter \"PNPClass='MEDIA'\" | "
+        "Select-Object Name,Manufacturer,Status,Service,PNPDeviceID,DeviceID,ClassGuid | "
+        "ConvertTo-Json -Depth 4"
+    )
+    rows = _run_powershell_json(script)
+    payload = {
+        "host_platform": platform.platform(),
+        "count": len(rows),
+        "media_endpoints": rows,
+    }
+    return json.dumps(payload, indent=2)
+
+
+def get_audio_stack_report() -> str:
+    cards = _run_powershell_json(
+        "Get-CimInstance Win32_SoundDevice | "
+        "Select-Object Name,Manufacturer,Status,PNPDeviceID,ProductName,DeviceID | "
+        "ConvertTo-Json -Depth 4"
+    )
+    media = _run_powershell_json(
+        "Get-CimInstance Win32_PnPEntity -Filter \"PNPClass='MEDIA'\" | "
+        "Select-Object Name,Manufacturer,Status,Service,PNPDeviceID,DeviceID,ClassGuid | "
+        "ConvertTo-Json -Depth 4"
+    )
+    payload = {
+        "host_platform": platform.platform(),
+        "os_name": os.name,
+        "sound_mapper_defaults": _get_sound_mapper_defaults(),
+        "winmm_caps": _get_winmm_wave_caps(),
+        "sound_device_count": len(cards),
+        "media_endpoint_count": len(media),
+        "sound_devices": cards,
+        "media_endpoints": media,
+    }
+    return json.dumps(payload, indent=2)
 
 
 def pick_server_exe(srv: ScServerInstance, install: ScInstallInfo | None) -> Path | None:

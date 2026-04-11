@@ -162,6 +162,21 @@ def build_server(host: str = "127.0.0.1", port: int = 8000, streamable_http_path
         return sc_process.get_audio_diagnostics(server_pid=server_pid, osc_port=osc_port)
 
     @mcp.tool()
+    def get_audio_cards_raw_info() -> str:
+        """Return detailed raw audio card information from Windows using Python stdlib + CIM queries."""
+        return sc_process.get_audio_cards_raw_info()
+
+    @mcp.tool()
+    def get_audio_endpoints_raw_info() -> str:
+        """Return detailed raw MEDIA endpoint/device information (playback/capture path candidates)."""
+        return sc_process.get_audio_endpoints_raw_info()
+
+    @mcp.tool()
+    def get_audio_stack_report() -> str:
+        """Return comprehensive raw audio stack report: sound cards, MEDIA endpoints, Sound Mapper defaults, and winmm capability masks."""
+        return sc_process.get_audio_stack_report()
+
+    @mcp.tool()
     def start_supercollider_server(
         port: Annotated[int, "UDP port for the scsynth server to listen on (default 57110)."] = 57110,
         use_supernova: Annotated[bool, "Boot supernova instead of scsynth if available."] = False,

@@ -2,7 +2,7 @@
 
 MCP Server for SuperCollider.
 
-Fully local pipeline with MCP Client OpenWebUI and Ollama `gemma3:27b` model.
+Fully local pipeline with Supercollider MCP, using OpenWebUI as front-end and Ollama `gemma3:27b` model, runs on RTX3090 24Gb.
 
 ## Build
 
@@ -20,9 +20,6 @@ cargo run -- --http
 # To test tools (preconfigured: Streamable HTTP + URL)
 npx -y @modelcontextprotocol/inspector --transport http --server-url http://127.0.0.1:8787/mcp
 
-start_supercollider_server
-play_test_tone
-get_audio_diagnostics
 ```
 
 
@@ -42,6 +39,11 @@ get_audio_diagnostics
 - `detect_supercollider_install()` — resolve `sclang`, `scsynth`, `supernova` exe paths
 - `get_supercollider_version()` — version from install path + `sclang -v`
 - `get_server_docs()` — local `HelpSource` paths + doc.sccode.org mirrors
+
+**Audio Hardware (raw python)**
+- `get_audio_cards_raw_info()` — detailed raw sound card inventory from Windows/CIM
+- `get_audio_endpoints_raw_info()` — raw MEDIA endpoint/device inventory (playback/capture path candidates)
+- `get_audio_stack_report()` — combined report: sound cards, endpoints, Sound Mapper defaults, and `winmm` capabilities
 
 **Docs**
 - `get_docs_index_status()` — HelpSource root, file count, index loaded?
@@ -63,27 +65,9 @@ get_audio_diagnostics
 - `quit_supercollider_server(server_pid?, osc_port?)` — send OSC `/quit` to stop the server process
 - `reboot_supercollider_server(server_pid?, osc_port?)` — `/quit` then respawn with `-u <port>`
 
-Headless behavior notes:
-- This MCP talks to `scsynth` and runs `sclang` headless; the SuperCollider IDE window will not "show" code execution.
-- Avoid `s.waitForBoot`, `s.boot`, or top-level `s.sleep` in MCP snippets.
-- Prefer: `start_supercollider_server()` -> `play_test_tone()` -> `execute_supercollider_code(...)`.
-- If no sound: run `get_audio_diagnostics()` immediately after `play_test_tone()`.
 
-Control target tracking:
-- MCP tracks the active target as `GLOBAL_SUPERCOLIDER_APP_PID`.
-- MCP tracks whether control is on/off via `GLOBAL_SUPERCOLIDER_ACTIVE`.
-- If a server is already running, `start_supercollider_server` reuses it instead of spawning another.
-- If no server is running, it starts one and sets `GLOBAL_SUPERCOLIDER_APP_PID` to that PID.
-- Health/status checks auto-adopt a reachable server as ACTIVE when found.
-- `execute` / `stop` / `quit` / `reboot` prefer explicit args first, then `GLOBAL_SUPERCOLIDER_APP_PID`.
 
-> execute/stop/quit/reboot affect live audio processes — enable only for local trusted sessions.
-
-## Docs QA quick start
-
-Call `initialize_supercollider_session()` once at the start — it auto-runs install detection, loads the docs index if needed, and returns the tool routing table. Then go straight to search or Q&A.
-
-### Open WebUI (example flow)
+### Open WebUI (example)
 
 - Add MCP server URL `http://127.0.0.1:8787/mcp` (Streamable HTTP).
 - In chat, enable tools.
