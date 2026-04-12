@@ -319,8 +319,10 @@ def build_index_impl() -> DocsIndex:
     return DocsIndex(root=root, built_at_epoch_s=time(), chunks=chunks, files_indexed=len(files))
 
 
-def ensure_index(force_refresh: bool) -> DocsIndex:
+def ensure_index(force_refresh: bool = False, *, force: bool | None = None) -> DocsIndex:
     global DOCS_INDEX
+    if force is not None:
+        force_refresh = force
     with DOCS_LOCK:
         if force_refresh or DOCS_INDEX is None:
             DOCS_INDEX = build_index_impl()

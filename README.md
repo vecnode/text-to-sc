@@ -4,47 +4,36 @@ MCP Server for SuperCollider.
 
 Fully local pipeline with Supercollider MCP, using OpenWebUI as front-end and Ollama `gemma3:27b` model, runs on RTX3090 24Gb.
 
-## Build
+### Build
 
 ```bash
 # Start OpenWebUI
 open-webui serve
 
 # Start the Python MCP
-cd python-server
 python -m supercollider_mcp_py.main --http --bind 0.0.0.0:8787
 
-# Previous Rust MCP Tester
-cargo run -- --http
-
-# To test tools (preconfigured: Streamable HTTP + URL)
+# Test MCP Tools (preconfigured: Streamable HTTP + URL)
 npx -y @modelcontextprotocol/inspector --transport http --server-url http://127.0.0.1:8787/mcp
 
+# Optional: Rust MCP implementation
+cargo run --manifest-path rust-server/Cargo.toml -- --http
 ```
 
+### MCP tools
 
-## MCP tools (callable)
-
-**Session**
-- `initialize_supercollider_session()` — runs the full startup sequence in one call: detect install → ensure docs index loaded → return routing hints
-
-**Discovery & Health**
-- `ping_supercollider(message?)` — health check: process scan, OSC probe, install detect, `server_alive` flag
-- `get_servers()` — running `scsynth`/`supernova` list with PID, CPU/mem, uptime, OSC port
-- `discover_supercollider()` — full JSON report: processes, OSC reachability, install info
-- `get_server_status(pid?)` — OSC status for one PID or auto-selected server
-- `list_server_candidates()` — all SC-related processes (`scsynth`, `supernova`, `sclang`, `scide`) for debugging
-
-**Install & Version**
-- `detect_supercollider_install()` — resolve `sclang`, `scsynth`, `supernova` exe paths
-- `get_supercollider_version()` — version from install path + `sclang -v`
-- `get_server_docs()` — local `HelpSource` paths + doc.sccode.org mirrors
-
-**Audio Hardware (raw python)**
-- `get_audio_cards_raw_info()` — detailed raw sound card inventory from Windows/CIM
-- `get_audio_endpoints_raw_info()` — raw MEDIA endpoint/device inventory (playback/capture path candidates)
-- `get_audio_stack_report()` — combined report: sound cards, endpoints, Sound Mapper defaults, and `winmm` capabilities
-
+**MCP Core (high-level, keep exposed)**
+- `initialize_supercollider_session`
+- `ensure_supercollider_app_on`
+- `get_server_status`
+- `search_supercollider_docs`
+- `answer_supercollider_docs`
+- `check_sclang_syntax`
+- `execute_supercollider_code`
+- `play_test_tone`
+- `stop_supercollider_synths`
+- `reboot_supercollider_server`
+- `get_audio_diagnostics`
 **Docs**
 - `get_docs_index_status()` — HelpSource root, file count, index loaded?
 - `refresh_supercollider_docs_index()` — build/refresh in-memory index from `.schelp` files
@@ -52,8 +41,11 @@ npx -y @modelcontextprotocol/inspector --transport http --server-url http://127.
 - `answer_supercollider_docs(question)` — grounded Q&A from indexed docs
 - `get_mcp_tool_routing_hints()` — intent → tool routing table
 
-**Execution** *(trusted host only)*
+**Execution**
+- `initialize_supercollider_session()` — runs the full startup sequence in one call: detect install → ensure docs index loaded → return routing hints
 - `check_sclang_syntax(code)` — compile-check without executing (~0.5–2s class library load)
+- `ensure_supercollider_app_on(port?, use_supernova?, boot_server?)` — ensures SuperCollider app/runtime (`scide`/`sclang`) is ON; optionally boots/reuses audio server too
+- `ensure_supercollider_server_on(port?, use_supernova?)` — ensure server is ON; reuse existing reachable `scsynth`/`supernova` or boot one if none are running
 - `start_supercollider_server(port?, use_supernova?)` — boot scsynth/supernova directly from the detected install; no IDE needed
 - `set_supercollider_server_active(server_pid?, osc_port?)` — ensure server is ACTIVE for MCP control; starts one if none is running
 - `set_supercollider_server_inactive()` — mark server control state INACTIVE without killing the process
@@ -66,6 +58,27 @@ npx -y @modelcontextprotocol/inspector --transport http --server-url http://127.
 - `reboot_supercollider_server(server_pid?, osc_port?)` — `/quit` then respawn with `-u <port>`
 
 
+### API
+
+**API/Internal only (remove from MCP surface, keep in app API)**
+- `discover_supercollider`
+- `list_server_candidates`
+- `get_servers`
+- `detect_supercollider_install`
+- `get_supercollider_version`
+- `get_server_docs`
+- `get_docs_index_status`
+- `refresh_supercollider_docs_index`
+- `get_mcp_tool_routing_hints`
+- `get_audio_cards_raw_info`
+- `get_audio_endpoints_raw_info`
+- `get_audio_stack_report`
+- `start_supercollider_server`
+- `ensure_supercollider_server_on`
+- `set_supercollider_server_active`
+- `set_supercollider_server_inactive`
+- `turn_down_supercollider_server`
+- `quit_supercollider_server`
 
 ### Open WebUI (example)
 

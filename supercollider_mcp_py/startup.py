@@ -5,16 +5,10 @@ import threading
 
 
 TOOLS_BANNER = (
-    "initialize_supercollider_session, ping_supercollider, get_servers, "
-    "discover_supercollider, get_server_status, detect_supercollider_install, "
-    "get_supercollider_version, get_server_docs, list_server_candidates, "
-    "get_docs_index_status, get_mcp_tool_routing_hints, "
-    "refresh_supercollider_docs_index, search_supercollider_docs, "
-    "answer_supercollider_docs, check_sclang_syntax, execute_supercollider_code, play_test_tone, get_audio_diagnostics, "
-    "get_audio_cards_raw_info, get_audio_endpoints_raw_info, get_audio_stack_report, "
-    "start_supercollider_server, set_supercollider_server_active, set_supercollider_server_inactive, "
-    "turn_down_supercollider_server, stop_supercollider_synths, "
-    "quit_supercollider_server, reboot_supercollider_server"
+    "initialize_supercollider_session, ensure_supercollider_app_on, get_server_status, "
+    "search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, "
+    "execute_supercollider_code, play_test_tone, stop_supercollider_synths, "
+    "reboot_supercollider_server, get_audio_diagnostics"
 )
 
 

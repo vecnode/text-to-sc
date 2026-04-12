@@ -39,7 +39,7 @@ _SERVER_LOG_PATHS_LOCK = threading.Lock()
 LOADED_MCP_TONE_PORTS: set[int] = set()
 _LOADED_MCP_TONE_PORTS_LOCK = threading.Lock()
 
-ASSETS_DIR = Path(__file__).resolve().parents[3] / "assets"
+ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 SCLANG_SYNTAX_BOOTSTRAP = (ASSETS_DIR / "sclang_syntax_bootstrap.sc").read_text(encoding="utf-8")
 SCLANG_REMOTE_EXECUTE_BOOTSTRAP = (ASSETS_DIR / "sclang_remote_execute.sc").read_text(encoding="utf-8")
 
@@ -759,6 +759,25 @@ def pick_server_exe(srv: ScServerInstance, install: ScInstallInfo | None) -> Pat
     return None
 
 
+def pick_app_exe(install: ScInstallInfo | None) -> Path | None:
+    if not install:
+        return None
+
+    base = Path(install.base_dir)
+    candidates = [
+        base / "scide.exe",
+        base / "SCIDE.exe",
+        base / "sclang.exe",
+        base / "bin" / "scide.exe",
+        base / "bin" / "SCIDE.exe",
+        base / "bin" / "sclang.exe",
+    ]
+    for exe in candidates:
+        if exe.is_file():
+            return exe
+    return None
+
+
 def install_match_for(process_name_lower: str, exe_path: str | None, install: ScInstallInfo | None) -> str:
     if not install:
         return "install_not_detected"
@@ -925,7 +944,7 @@ def probe(message: str | None = None) -> str:
     if snapshot.install:
         lines.append(f"- install: detected at {snapshot.install.base_dir}")
         if not server_alive:
-            lines.append("- action: call start_supercollider_server() to boot scsynth (no IDE needed).")
+            lines.append("- action: call ensure_supercollider_server_on() to boot/reuse a live server (no IDE needed).")
     else:
         lines.append("- install: not detected in standard paths")
 
@@ -951,7 +970,7 @@ def get_servers() -> str:
         lines.append(f"- GLOBAL_SUPERCOLIDER_ACTIVE={tracked_active}")
         if snapshot.install:
             lines.append(f"- install detected at {snapshot.install.base_dir}")
-            lines.append("- action: call start_supercollider_server() to boot scsynth directly (no IDE needed).")
+            lines.append("- action: call ensure_supercollider_server_on() to boot/reuse a live server (no IDE needed).")
         else:
             lines.append("- action: call detect_supercollider_install() first — no SC install found.")
         return "\n".join(lines)
@@ -1029,7 +1048,7 @@ def get_server_status(pid: int | None = None) -> str:
                 f"- install detected at {install.base_dir}\n"
                 f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
                 f"- GLOBAL_SUPERCOLIDER_ACTIVE={get_global_supercolider_active()}\n"
-                "- action: call start_supercollider_server() to boot scsynth directly."
+                "- action: call ensure_supercollider_server_on() to boot/reuse a live server."
             )
         return (
             "No SuperCollider server process currently running (scsynth/supernova).\n"
@@ -1456,6 +1475,94 @@ def start_supercollider_server(port: int = 57110, use_supernova: bool = False) -
     )
 
 
+def ensure_supercollider_server_on(port: int = 57110, use_supernova: bool = False) -> str:
+    """Ensure a live server is available; start one when none are reachable."""
+    try:
+        snapshot = collect_snapshot()
+    except Exception as exc:
+        return f"ensure_supercollider_server_on failed: {exc}"
+
+    running = [s for s in snapshot.servers if s.osc_reachable]
+    if running:
+        chosen = next((s for s in running if s.responding_port == port), None)
+        if chosen is None:
+            tracked = get_global_supercolider_app_pid()
+            chosen = next((s for s in running if tracked is not None and s.pid == tracked), None)
+        if chosen is None:
+            chosen = running[0]
+        set_global_supercolider_app_pid(chosen.pid)
+        set_global_supercolider_active(True)
+        return (
+            "ensure_supercollider_server_on: already on\n"
+            f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
+            f"- GLOBAL_SUPERCOLIDER_ACTIVE={get_global_supercolider_active()}\n"
+            f"- pid={chosen.pid}\n"
+            f"- name={chosen.name}\n"
+            f"- osc_udp_port={chosen.responding_port}\n"
+            "- note: reusing an existing reachable server process."
+        )
+
+    started = start_supercollider_server(port=port, use_supernova=use_supernova)
+    if started.startswith("start_supercollider_server:"):
+        return started.replace("start_supercollider_server:", "ensure_supercollider_server_on:", 1)
+    return f"ensure_supercollider_server_on:\n{started}"
+
+
+def ensure_supercollider_app_on(
+    port: int = 57110,
+    use_supernova: bool = False,
+    boot_server: bool = True,
+) -> str:
+    """Ensure a SuperCollider app process (scide/sclang) is running; optionally ensure the audio server too."""
+    try:
+        snapshot = collect_snapshot()
+    except Exception as exc:
+        return f"ensure_supercollider_app_on failed: {exc}"
+
+    apps = [c for c in snapshot.candidates if c.role in {"scide", "sclang"}]
+    chosen = None
+    if apps:
+        chosen = next((c for c in apps if c.role == "scide"), None)
+        if chosen is None:
+            chosen = apps[0]
+        lines = [
+            "ensure_supercollider_app_on: already on",
+            f"- app_pid={chosen.pid}",
+            f"- app_name={chosen.name}",
+            f"- app_exe={chosen.exe_path or '<unknown>'}",
+        ]
+    else:
+        install = detect_install_impl()
+        exe = pick_app_exe(install)
+        if not install or not exe:
+            return (
+                "ensure_supercollider_app_on failed: could not locate scide.exe/sclang.exe from detected install.\n"
+                "- action: call detect_supercollider_install() to inspect install paths."
+            )
+
+        try:
+            child = subprocess.Popen([str(exe)], cwd=str(Path(install.base_dir)))
+        except Exception as exc:
+            return f"ensure_supercollider_app_on failed: spawn {exe}: {exc}"
+
+        time.sleep(0.5)
+        lines = [
+            "ensure_supercollider_app_on: started",
+            f"- app_pid={child.pid}",
+            f"- app_exe={exe}",
+            "- note: started SC app/runtime process; it may still be initializing.",
+        ]
+
+    if boot_server:
+        server_status = ensure_supercollider_server_on(port=port, use_supernova=use_supernova)
+        lines.append("--- server ---")
+        lines.append(server_status)
+    else:
+        lines.append("- server_boot=false (audio server not started by this call)")
+
+    return "\n".join(lines)
+
+
 def play_test_tone(
     freq_hz: float = 440.0,
     amp: float = 0.15,
@@ -1474,6 +1581,32 @@ def play_test_tone(
         srv, port = resolve_control_target(server_pid, osc_port)
     except Exception as exc:
         return f"play_test_tone failed: {exc}"
+
+    def _fallback_via_sclang() -> str:
+        code = (
+            "(\n"
+            f"var _mcpFreq = {float(freq_hz):.6f};\n"
+            f"var _mcpAmp = {float(amp):.6f};\n"
+            f"var _mcpDur = {float(duration_s):.6f};\n"
+            "var _mcpSynth;\n"
+            "_mcpSynth = { SinOsc.ar(_mcpFreq, 0, _mcpAmp) ! 2 }.play;\n"
+            "SystemClock.sched(_mcpDur, { _mcpSynth.free; nil });\n"
+            ")\n"
+        )
+        inner = execute_supercollider_code(code=code, server_pid=srv.pid, osc_port=port)
+        if inner.startswith("execute_supercollider_code: OK"):
+            return (
+                "play_test_tone: OK\n"
+                "- mode=sclang_fallback\n"
+                f"- target_server_pid={srv.pid}\n"
+                f"- GLOBAL_SUPERCOLIDER_APP_PID={get_global_supercolider_app_pid()}\n"
+                f"- osc_udp_port={port}\n"
+                f"- freq_hz={freq_hz}\n"
+                f"- amp={amp}\n"
+                f"- duration_s={duration_s}\n"
+                "- note: direct OSC synth creation failed; played via execute_supercollider_code fallback."
+            )
+        return inner
 
     load_err = _ensure_mcp_tone_synthdef_loaded(port)
     if load_err:
@@ -1513,6 +1646,15 @@ def play_test_tone(
         create_errors.append(f"attempt_{attempt}=no_synth_count_increase")
 
     if not created:
+        fallback = _fallback_via_sclang()
+        if fallback.startswith("play_test_tone: OK"):
+            return (
+                f"{fallback}\n"
+                "- direct_osc_error=synth_node_not_created\n"
+                f"- direct_synth_count_before={before.get('synth_count') if before else None}\n"
+                f"- direct_synth_count_during={during.get('synth_count') if during else None}\n"
+                f"- direct_attempts={create_errors}"
+            )
         return (
             "play_test_tone: ERROR\n"
             "- reason=synth_node_not_created\n"
@@ -1524,7 +1666,9 @@ def play_test_tone(
             f"- status_raw_before={before.get('raw_args') if before else None}\n"
             f"- status_raw_during={during.get('raw_args') if during else None}\n"
             f"- attempts={create_errors}\n"
-            "- hint: scsynth is reachable but did not instantiate mcpTone; run get_audio_diagnostics() and inspect server_log."
+            "- fallback=execute_supercollider_code_failed\n"
+            f"--- fallback_output ---\n{fallback}\n"
+            "- hint: run get_audio_diagnostics() and inspect server_log."
         )
 
     if during is None:
@@ -1738,6 +1882,13 @@ def reboot_supercollider_server(server_pid: int | None = None, osc_port: int | N
     try:
         srv, port = resolve_control_target(server_pid, osc_port)
     except Exception as exc:
+        reason = str(exc)
+        if "No SuperCollider audio server found" in reason:
+            started = ensure_supercollider_app_on()
+            return (
+                "reboot_supercollider_server: no running server to reboot; started SuperCollider instead.\n"
+                f"{started}"
+            )
         return f"reboot_supercollider_server failed: {exc}"
 
     exe = pick_server_exe(srv, install)
