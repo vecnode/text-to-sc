@@ -15,7 +15,7 @@ def build_server(host: str = "127.0.0.1", port: int = 8000, streamable_http_path
         port=port,
         streamable_http_path=streamable_http_path,
         instructions=(
-            "Use initialize_supercollider_session first; ensure_supercollider_app_on to boot app/runtime; "
+            "Use ensure_supercollider_app_on to boot app/runtime; "
             "get_server_status for control target health; search_supercollider_docs/answer_supercollider_docs "
             "for grounded docs; check_sclang_syntax before execution; execute_supercollider_code/play_test_tone "
             "for sound actions; stop_supercollider_synths/reboot_supercollider_server for recovery; "
@@ -31,12 +31,6 @@ def build_server(host: str = "127.0.0.1", port: int = 8000, streamable_http_path
     ) -> str:
         """Get OSC reachability, CPU/memory, and uptime for a specific server PID or auto-pick active server."""
         return sc_process.get_server_status(pid)
-
-    @mcp.tool()
-    def initialize_supercollider_session() -> str:
-        """Run the full session-start sequence in one call: detect install, ensure docs index is loaded, return tool routing hints. Call this once at the start of any session instead of chaining individual setup tools."""
-        return sc_docs.initialize_supercollider_session()
-
 
     @mcp.tool()
     def search_supercollider_docs(

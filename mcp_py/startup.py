@@ -5,7 +5,7 @@ import threading
 
 
 TOOLS_BANNER = (
-    "initialize_supercollider_session, ensure_supercollider_app_on, get_server_status, "
+    "ensure_supercollider_app_on, get_server_status, "
     "search_supercollider_docs, answer_supercollider_docs, check_sclang_syntax, "
     "execute_supercollider_code, play_test_tone, stop_supercollider_synths, "
     "reboot_supercollider_server, get_audio_diagnostics"

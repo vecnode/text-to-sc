@@ -11,7 +11,7 @@ Fully local pipeline with Supercollider MCP, using OpenWebUI as front-end and Ol
 open-webui serve
 
 # Start the Python MCP
-python -m supercollider_mcp_py.main --http --bind 0.0.0.0:8787
+python -m mcp_py.main --http --bind 0.0.0.0:8787
 
 # Test MCP Tools (preconfigured: Streamable HTTP + URL)
 npx -y @modelcontextprotocol/inspector --transport http --server-url http://127.0.0.1:8787/mcp
@@ -22,8 +22,7 @@ cargo run --manifest-path rust-server/Cargo.toml -- --http
 
 ### MCP tools
 
-**MCP Core (high-level, keep exposed)**
-- `initialize_supercollider_session`
+**MCP Core (exposed)**
 - `ensure_supercollider_app_on`
 - `get_server_status`
 - `search_supercollider_docs`
@@ -34,6 +33,7 @@ cargo run --manifest-path rust-server/Cargo.toml -- --http
 - `stop_supercollider_synths`
 - `reboot_supercollider_server`
 - `get_audio_diagnostics`
+
 **Docs**
 - `get_docs_index_status()` — HelpSource root, file count, index loaded?
 - `refresh_supercollider_docs_index()` — build/refresh in-memory index from `.schelp` files
@@ -42,7 +42,6 @@ cargo run --manifest-path rust-server/Cargo.toml -- --http
 - `get_mcp_tool_routing_hints()` — intent → tool routing table
 
 **Execution**
-- `initialize_supercollider_session()` — runs the full startup sequence in one call: detect install → ensure docs index loaded → return routing hints
 - `check_sclang_syntax(code)` — compile-check without executing (~0.5–2s class library load)
 - `ensure_supercollider_app_on(port?, use_supernova?, boot_server?)` — ensures SuperCollider app/runtime (`scide`/`sclang`) is ON; optionally boots/reuses audio server too
 - `ensure_supercollider_server_on(port?, use_supernova?)` — ensure server is ON; reuse existing reachable `scsynth`/`supernova` or boot one if none are running

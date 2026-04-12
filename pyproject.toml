@@ -14,8 +14,8 @@ dependencies = [
 ]
 
 [project.scripts]
-supercollider-mcp-python = "supercollider_mcp_py.main:cli"
+supercollider-mcp-python = "mcp_py.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["supercollider_mcp_py*"]
+include = ["mcp_py*"]
