@@ -89,7 +89,7 @@ the *versioned* folders a real install uses, such as
 
 ## The tools
 
-Ten, organised by intent rather than by mechanism.
+Eleven, organised by intent rather than by mechanism.
 
 | Tool | What it does |
 |---|---|
@@ -98,7 +98,8 @@ Ten, organised by intent rather than by mechanism.
 | `sc_check` | Compile-check sclang without running it |
 | `sc_exec` | Run code in the session that stays alive — the real-time core |
 | `sc_play` | A known-good tone, and the report of what the server actually did |
-| `sc_project` | Read, list and write `.scd` files; send one to the live session |
+| `sc_capture` | **Measure what a sound really is**: plays it, records its output, reports peak, RMS, clipping, tonality and the strongest partials |
+| `sc_project` | Read, list and write `.scd` files; send one to the live session; **browse the sixteen bundled example instruments and load one** |
 | `sc_load` | Evaluate a `.scd` that is on disk — the edit-here / hear-it loop |
 | `sc_synthdef` | Compile, cache, load, list and free SynthDefs |
 | `sc_nodes` | The running graph: tree, set a control while it plays, free, free all |
@@ -119,12 +120,14 @@ Ten, organised by intent rather than by mechanism.
 ```
 plugin/          THE PACKAGE - this is what vncode ships as packages/dsh-supercollider/
   lib/engine/    the engine: OSC, install and process discovery, the sclang session,
-                 scsynth control, the .schelp index, the .scd file workflow
-  lib/tools.js   the ten tools
+                 scsynth control, the .schelp index, the .scd file workflow,
+                 the example catalogue, and the measurement arithmetic
+  lib/tools.js   the eleven tools
   lib/client.js  the console tab
   skills/        the five skills
+  examples/      sixteen playable instruments, each explaining its DSP idea
   mcp/stdio.js   the MCP face for other clients
-  checks/        the three checks, so they travel with the package
+  checks/        the four checks, so they travel with the package
 scripts/         install (PowerShell + POSIX shell) and the vncode sync
 legacy/          the Rust and Python MCP servers this was ported from, still working
 ```
@@ -144,15 +147,16 @@ was kept, what was changed and what was deliberately dropped.
 
 ```
 cd plugin
-npm run check                 # all three, in order
+npm run check                 # all four, in order
 npm run check:node            # the engine, offline
 npm run check:wiring          # the package's contract, without the harness
 npm run check:examples        # every skill example, compiled
+npm run check:library         # every bundled instrument, compiled and shaped
 ```
 
 The checks live **inside the package** (`plugin/checks/`), so they travel with it
 into vncode, where they run as `npm run check` in
-`packages/dsh-supercollider/`. All three skip a section loudly and exit 0 on a
+`packages/dsh-supercollider/`. All four skip a section loudly and exit 0 on a
 machine with no SuperCollider, and none is ever weakened to make a change pass.
 
 `check:wiring` is the one to run before touching packaging: it asserts the
@@ -160,7 +164,7 @@ manifest the harness reads (`dsh.bundle.patch`, `dsh.client.platform`, the
 `./client` export), runs the browser bundle as the classic script a loader
 instantiates — including calling its factory, since that is where the stylesheet
 and the plugin face live — and drives `apply(ctx)` against a stub context to
-prove ten tools, three routes and five skills register and that every tool
+prove eleven tools, three routes and five skills register and that every tool
 declares the output contract the registry enforces.
 
 ## Limits

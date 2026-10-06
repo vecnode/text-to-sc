@@ -38,7 +38,7 @@ const repo = path.resolve(here, '..')
 const source = path.join(repo, 'plugin')
 
 /** Everything that must travel. Anything else in the folder is build debris. */
-const INCLUDE = ['package.json', 'cordis.patch.yml', 'README.md', 'lib', 'skills', 'mcp', 'checks']
+const INCLUDE = ['package.json', 'cordis.patch.yml', 'README.md', 'lib', 'skills', 'examples', 'mcp', 'checks']
 
 /** Never copied: this is a checkout's own scratch, not the package. */
 const SKIP_NAMES = new Set(['.git', 'node_modules', '.DS_Store', 'Thumbs.db', '.scratch', 'tools'])
