@@ -18,8 +18,8 @@ const os = await import('node:os')
 const path = (await import('node:path')).default
 const { fileURLToPath, pathToFileURL } = await import('node:url')
 
-const repo = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
-const engine = path.join(repo, 'plugin', 'lib', 'engine')
+const repo = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
+const engine = path.join(repo, 'lib', 'engine')
 
 let failures = 0
 let skipped = 0

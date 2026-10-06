@@ -43,19 +43,19 @@ window.__ModuleLoader__.load({
     const h = jsxRuntime.jsx
 
     const css = `
-.dsc-console{display:flex;flex-direction:column;height:100%;min-height:0;font:12px/18px var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace)}
-.dsc-bar{display:flex;align-items:center;gap:8px;padding:4px 8px;flex:none;border-bottom:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28))}
-.dsc-barTitle{font-weight:600;color:var(--dsw-alias-label-primary,#e8e8e8)}
-.dsc-stat{color:var(--dsw-alias-label-tertiary,#8f8f8f);font-variant-numeric:tabular-nums;white-space:nowrap}
-.dsc-spacer{flex:1 1 auto}
-.dsc-btn{border:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28));background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);border-radius:5px;padding:1px 7px;cursor:pointer;font:inherit}
-.dsc-btn:hover{color:var(--dsw-alias-label-primary,#e8e8e8)}
-.dsc-btn:disabled{opacity:.5;cursor:default}
-.dsc-out{flex:1 1 auto;min-height:0;overflow:auto;padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary,#c8c8c8)}
-.dsc-outEmpty{color:var(--dsw-alias-label-tertiary,#8f8f8f)}
-.dsc-in{display:flex;gap:6px;padding:6px 8px;flex:none;border-top:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28))}
-.dsc-in input{flex:1 1 auto;min-width:0;background:transparent;border:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28));border-radius:5px;color:inherit;font:inherit;padding:2px 6px}
-.dsc-in input:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#4f8cff)}
+.dsu-console{display:flex;flex-direction:column;height:100%;min-height:0;font:12px/18px var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace)}
+.dsu-bar{display:flex;align-items:center;gap:8px;padding:4px 8px;flex:none;border-bottom:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28))}
+.dsu-barTitle{font-weight:600;color:var(--dsw-alias-label-primary,#e8e8e8)}
+.dsu-stat{color:var(--dsw-alias-label-tertiary,#8f8f8f);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dsu-spacer{flex:1 1 auto}
+.dsu-btn{border:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28));background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);border-radius:5px;padding:1px 7px;cursor:pointer;font:inherit}
+.dsu-btn:hover{color:var(--dsw-alias-label-primary,#e8e8e8)}
+.dsu-btn:disabled{opacity:.5;cursor:default}
+.dsu-out{flex:1 1 auto;min-height:0;overflow:auto;padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary,#c8c8c8)}
+.dsu-outEmpty{color:var(--dsw-alias-label-tertiary,#8f8f8f)}
+.dsu-in{display:flex;gap:6px;padding:6px 8px;flex:none;border-top:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28))}
+.dsu-in input{flex:1 1 auto;min-width:0;background:transparent;border:.5px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.28));border-radius:5px;color:inherit;font:inherit;padding:2px 6px}
+.dsu-in input:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#4f8cff)}
 `
 
     const CSS_TAG = 'dsh-supercollider/console.css'
@@ -225,17 +225,17 @@ window.__ModuleLoader__.load({
 
       return h(
         'div',
-        { className: 'dsc-console' },
+        { className: 'dsu-console' },
         h(
           'div',
-          { className: 'dsc-bar' },
-          h('span', { className: 'dsc-barTitle' }, title),
-          h('span', { className: 'dsc-spacer' }),
-          stat.length > 0 ? h('span', { className: 'dsc-stat' }, stat.join(' · ')) : null,
+          { className: 'dsu-bar' },
+          h('span', { className: 'dsu-barTitle' }, title),
+          h('span', { className: 'dsu-spacer' }),
+          stat.length > 0 ? h('span', { className: 'dsu-stat' }, stat.join(' · ')) : null,
           h(
             'button',
             {
-              className: 'dsc-btn',
+              className: 'dsu-btn',
               type: 'button',
               disabled: busy,
               onClick: stop,
@@ -246,11 +246,11 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
-          { className: 'dsc-out', ref: outRef },
+          { className: 'dsu-out', ref: outRef },
           output === ''
             ? h(
                 'div',
-                { className: 'dsc-outEmpty' },
+                { className: 'dsu-outEmpty' },
                 "The session's output appears here.\n" +
                   '\n' +
                   'The interpreter starts on the first send and stays warm between calls, so everything you define is still there next time.\n' +
@@ -261,10 +261,10 @@ window.__ModuleLoader__.load({
               )
             : output,
         ),
-        error !== '' ? h('div', { className: 'dsc-stat', style: { padding: '0 8px 4px' } }, error) : null,
+        error !== '' ? h('div', { className: 'dsu-stat', style: { padding: '0 8px 4px' } }, error) : null,
         h(
           'div',
-          { className: 'dsc-in' },
+          { className: 'dsu-in' },
           h('input', {
             value: line,
             spellCheck: false,
@@ -274,7 +274,7 @@ window.__ModuleLoader__.load({
           }),
           h(
             'button',
-            { className: 'dsc-btn', type: 'button', disabled: busy, onClick: send },
+            { className: 'dsu-btn', type: 'button', disabled: busy, onClick: send },
             busy ? '…' : 'Send',
           ),
         ),
@@ -283,7 +283,7 @@ window.__ModuleLoader__.load({
 
     /** The tab's title bar cell: the type's name, like every other tab's. */
     function ScTitle() {
-      return h('span', { className: 'dsc-barTitle' }, 'SuperCollider')
+      return h('span', { className: 'dsu-barTitle' }, 'SuperCollider')
     }
 
     /**

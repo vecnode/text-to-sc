@@ -124,16 +124,17 @@ plugin/          THE PACKAGE - this is what vncode ships as packages/dsh-superco
   lib/client.js  the console tab
   skills/        the five skills
   mcp/stdio.js   the MCP face for other clients
+  checks/        the three checks, so they travel with the package
+scripts/         install (PowerShell + POSIX shell) and the vncode sync
 legacy/          the Rust and Python MCP servers this was ported from, still working
-scripts/         install (PowerShell + POSIX shell), the vncode sync, the checks
 ```
 
 **Why `text-to-sc` is the source and vncode gets a copy.** The pack ships
 `packages/` as a live-linked directory inside a distribution, and its version
-manifest is checked against every package's `package.json`; a git submodule at an
+manifest is checked against every bundle's `package.json`; a git submodule at an
 external path satisfies neither, and a `node_modules` dependency is skipped by the
-distribution outright. So `scripts/sync-to-vncode.mjs` writes the copy, and
-`--check` fails when it has fallen behind.
+distribution outright. So [`scripts/sync-to-vncode.mjs`](scripts/sync-to-vncode.mjs)
+writes the copy — and `--check` fails when it has fallen behind.
 
 **Why the old MCP servers are still here.** They are the reference the port
 followed and they still run: see [`legacy/README.md`](legacy/README.md) for what
@@ -142,16 +143,19 @@ was kept, what was changed and what was deliberately dropped.
 ## Verify
 
 ```
-node scripts/checks/check-sc-node.mjs        # the engine, offline
-node scripts/checks/check-sc-examples.mjs    # every skill example, compiled
-node scripts/checks/check-sc-wiring.mjs      # the package's contract, without the harness
-node scripts/sync-to-vncode.mjs --check      # is the vncode copy stale?
+cd plugin
+npm run check                 # all three, in order
+npm run check:node            # the engine, offline
+npm run check:wiring          # the package's contract, without the harness
+npm run check:examples        # every skill example, compiled
 ```
 
-All three checks skip a section loudly and exit 0 on a machine with no
-SuperCollider, and none is ever weakened to make a change pass.
+The checks live **inside the package** (`plugin/checks/`), so they travel with it
+into vncode, where they run as `npm run check` in
+`packages/dsh-supercollider/`. All three skip a section loudly and exit 0 on a
+machine with no SuperCollider, and none is ever weakened to make a change pass.
 
-`check-sc-wiring.mjs` is the one to run before touching packaging: it asserts the
+`check:wiring` is the one to run before touching packaging: it asserts the
 manifest the harness reads (`dsh.bundle.patch`, `dsh.client.platform`, the
 `./client` export), runs the browser bundle as the classic script a loader
 instantiates — including calling its factory, since that is where the stylesheet

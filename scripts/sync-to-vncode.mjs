@@ -38,7 +38,7 @@ const repo = path.resolve(here, '..')
 const source = path.join(repo, 'plugin')
 
 /** Everything that must travel. Anything else in the folder is build debris. */
-const INCLUDE = ['package.json', 'cordis.patch.yml', 'README.md', 'lib', 'skills', 'mcp']
+const INCLUDE = ['package.json', 'cordis.patch.yml', 'README.md', 'lib', 'skills', 'mcp', 'checks']
 
 /** Never copied: this is a checkout's own scratch, not the package. */
 const SKIP_NAMES = new Set(['.git', 'node_modules', '.DS_Store', 'Thumbs.db', '.scratch', 'tools'])
@@ -150,9 +150,10 @@ function main() {
   if (differences.length > 0) say('  (' + differences.length + ' replaced)')
   say('')
   say('Next, in the vncode checkout:')
-  say('  1. add a "dsh-supercollider" entry to .dsh-version.json (rows: ["supercollider"])')
+  say('  1. add a "dsh-supercollider" entry to .dsh-version.json if it is not there yet')
+  say('     (the version must equal package.json; check-node-routes enforces it)')
   say('  2. add a row for it to README.md\'s plugin table')
-  say('  3. run: node scripts/checks/check-node-routes.mjs')
+  say('  3. run: node scripts/checks/check-node-routes.mjs, then (cd packages/dsh-supercollider && npm run check)')
   return 0
 }
 

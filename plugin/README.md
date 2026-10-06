@@ -53,10 +53,10 @@ engine for a client that has no harness at all.
   SynthDef browser, no editor: `.scd` files are claimed so they open in the
   **shipped editor**, and the agent works on them through `sc_project` /
   `sc_load`. Edit there, send, hear it here.
-- **An MCP face for clients that are not the harness.** `mcp/stdio.js` is a
-  hand-written JSON-RPC 2.0 server (initialize / tools/list / tools/call) over the
-  same engine, because the pack ships no npm dependencies and an MCP tool server
-  is a protocol small enough to write.
+- **An MCP face for clients that are not the harness** (`mcp/stdio.js`, or
+  `npm run mcp`). It is a hand-written JSON-RPC 2.0 server (initialize /
+  tools/list / tools/call) over the same engine, because the pack ships no npm
+  dependencies and an MCP tool server is a protocol small enough to write.
 
 ## How it plugs in
 
@@ -114,10 +114,15 @@ what makes "type it here, ask the agent about it there" work at all.
 
 ## Verify
 
+The checks live **inside this package** (`checks/`), so they travel with it: the
+vncode copy runs them as `npm run check` in `packages/dsh-supercollider/`, and a
+clone of that repository needs no scripts of its own.
+
 ```
-node scripts/checks/check-sc-node.mjs        # the engine, offline; the live half skips loudly
-node scripts/checks/check-sc-examples.mjs    # every skill example, compiled
-node scripts/checks/check-sc-wiring.mjs      # the package's contract, without the harness
+npm run check                 # all three, in order
+npm run check:node            # the engine, offline; the live half skips loudly
+npm run check:wiring          # the package's contract, without the harness
+npm run check:examples        # every skill example, compiled
 ```
 
 All three skip a section loudly and exit 0 when the machine has no

@@ -25,8 +25,8 @@ const { readdirSync, readFileSync, statSync } = await import('node:fs')
 const path = (await import('node:path')).default
 const { fileURLToPath, pathToFileURL } = await import('node:url')
 
-const repo = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
-const skillsDir = path.join(repo, 'plugin', 'skills')
+const repo = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
+const skillsDir = path.join(repo, 'skills')
 
 let failures = 0
 let compiled = 0
@@ -113,8 +113,8 @@ check('the skills mark at least one invalid example', invalid.length >= 1, true)
 
 // A complete example is offered to `sc_check` exactly as a user's snippet would
 // be: the whole block, which the tool wraps in its own parenthesised block.
-const install = await import(pathToFileURL(path.join(repo, 'plugin', 'lib', 'engine', 'install.js')).href)
-const sclang = await import(pathToFileURL(path.join(repo, 'plugin', 'lib', 'engine', 'sclang.js')).href)
+const install = await import(pathToFileURL(path.join(repo, 'lib', 'engine', 'install.js')).href)
+const sclang = await import(pathToFileURL(path.join(repo, 'lib', 'engine', 'sclang.js')).href)
 const live = install.resolveInstall({ env: process.env })
 
 if (!live.hasLanguage) {

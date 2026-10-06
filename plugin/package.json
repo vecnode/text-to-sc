@@ -11,12 +11,23 @@
     "./engine/osc": "./lib/engine/osc.js",
     "./package.json": "./package.json"
   },
+  "bin": {
+    "dsh-supercollider-mcp": "./mcp/stdio.js"
+  },
   "files": [
     "lib",
     "skills",
     "mcp",
+    "checks",
     "cordis.patch.yml"
   ],
+  "scripts": {
+    "check:node": "node checks/check-sc-node.mjs",
+    "check:examples": "node checks/check-sc-examples.mjs",
+    "check:wiring": "node checks/check-sc-wiring.mjs",
+    "check": "node checks/check-sc-node.mjs && node checks/check-sc-wiring.mjs && node checks/check-sc-examples.mjs",
+    "mcp": "node mcp/stdio.js"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

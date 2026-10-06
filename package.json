@@ -1,0 +1,20 @@
+{
+  "name": "text-to-sc",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "SuperCollider for the agent: the dsh-supercollider plugin pack, its five skills, the install and sync scripts, and the two MCP servers it was ported from (legacy/).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node plugin/checks/check-sc-node.mjs && node plugin/checks/check-sc-wiring.mjs && node plugin/checks/check-sc-examples.mjs",
+    "check:node": "node plugin/checks/check-sc-node.mjs",
+    "check:wiring": "node plugin/checks/check-sc-wiring.mjs",
+    "check:examples": "node plugin/checks/check-sc-examples.mjs",
+    "mcp": "node plugin/mcp/stdio.js",
+    "sync": "node scripts/sync-to-vncode.mjs",
+    "sync:check": "node scripts/sync-to-vncode.mjs --check"
+  }
+}

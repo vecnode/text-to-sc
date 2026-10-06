@@ -27,8 +27,8 @@ const { readFileSync } = await import('node:fs')
 const path = (await import('node:path')).default
 const { fileURLToPath, pathToFileURL } = await import('node:url')
 
-const repo = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
-const plugin = path.join(repo, 'plugin')
+const repo = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
+const plugin = repo
 
 let failures = 0
 function check(label, actual, expected) {
@@ -120,6 +120,18 @@ check('the client plugin exposes apply', typeof clientModule.apply, 'function')
 check('a PLUGIN_VERSION matches package.json', clientModule.PLUGIN_VERSION, pkg.version)
 check('it injects exactly one stylesheet', styleTag !== null, true)
 check('the stylesheet is tagged for the harness check', styleTag?.dataset?.pluginCss, 'dsh-supercollider/console.css')
+
+// The class prefix has to be this package's OWN. The pack's
+// `check-client-bundles.mjs` fails any class two bundles define, because the
+// LAST stylesheet wins every equal-specificity tie, so a collision silently
+// redresses another package's UI. It caught exactly this: `.dsc-` is
+// dsh-cmdbar's prefix and the console was written with it. This check finds the
+// same thing in milliseconds, and in THIS repository rather than the pack's.
+const stylesheet = styleTag?._css ?? ''
+const prefixes = [...new Set([...stylesheet.matchAll(/\.([a-z]{2,6}-)[a-zA-Z]/g)].map((match) => match[1]))]
+check('the stylesheet defines exactly one prefix', prefixes.length, 1)
+check('the prefix is this package\'s own ("dsu-")', prefixes[0], 'dsu-')
+console.log('     classes: ' + [...new Set([...stylesheet.matchAll(/\.([a-z]{2,6}-[a-zA-Z]+)/g)].map((m) => m[1]))].sort().join(', '))
 
 // Its own apply, against a stub bar: one tab type and two seats.
 const clientRegistrations = []
