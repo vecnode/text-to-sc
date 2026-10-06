@@ -1,85 +1,178 @@
-# supercollider-mcp
+# text-to-sc
 
-MCP Server for SuperCollider.
+![Language: JavaScript](https://img.shields.io/badge/language-JavaScript-f7df1e?logo=javascript&logoColor=black)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+![SuperCollider 3.13+](https://img.shields.io/badge/supercollider-3.13%2B-ff6b6b)
+![DeepSeek Harness 0.2.0-rc.2](https://img.shields.io/badge/dsh-0.2.0--rc.2-4f8cff)
+![Platforms: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-Fully local pipeline with Supercollider MCP, using OpenWebUI as front-end and Ollama `gemma3:27b` model, runs on RTX3090 24Gb.
+**Give your agent SuperCollider superpowers.** Five skills teach it the language,
+SynthDefs and live coding; a local engine boots the audio server, compiles and
+loads patches, and plays and rewrites them while they sound — in DSH today, and
+in any MCP-capable agent through the same engine.
 
-### Build
-
-```bash
-# Start OpenWebUI
-open-webui serve
-
-# Start the Python MCP
-python -m mcp_py.main --http --bind 0.0.0.0:8787
-
-# Test MCP Tools (preconfigured: Streamable HTTP + URL)
-npx -y @modelcontextprotocol/inspector --transport http --server-url http://127.0.0.1:8787/mcp
-
-# Optional: Rust MCP implementation
-cargo run --manifest-path rust-server/Cargo.toml -- --http
+```supercollider
+Ndef(\drone, { |freq = 55, amp = 0.1| LFTri.ar(freq) * amp }).play;
+Ndef(\drone).set(\freq, 41.2);      // still playing, no gap
 ```
 
-### MCP tools
+## What this is
 
-**MCP Core (exposed)**
-- `ensure_supercollider_app_on`
-- `get_server_status`
-- `search_supercollider_docs`
-- `answer_supercollider_docs`
-- `check_sclang_syntax`
-- `execute_supercollider_code`
-- `play_test_tone`
-- `stop_supercollider_synths`
-- `reboot_supercollider_server`
-- `get_audio_diagnostics`
+An agent that knows about audio DSP still gets SuperCollider wrong, because
+SuperCollider is three specific things: a **language** with its own idioms, a
+**server** that only speaks OSC, and a **reference** of over a thousand `.schelp`
+files. This repository gives an agent all three.
 
-**Docs**
-- `get_docs_index_status()` — HelpSource root, file count, index loaded?
-- `refresh_supercollider_docs_index()` — build/refresh in-memory index from `.schelp` files
-- `search_supercollider_docs(query, max_results?, output?, source?)` — ranked local search; `output=json` for citations
-- `answer_supercollider_docs(question)` — grounded Q&A from indexed docs
-- `get_mcp_tool_routing_hints()` — intent → tool routing table
+- **It listens.** One `sclang` session stays alive across tool calls, so what the
+  agent defines is still there — and still playing — next time. Measured on the
+  machine this was written on: ready in ~1 s, then **62 ms** per evaluation.
+  Spawning a fresh interpreter per call, which is what the MCP servers here used
+  to do, costs 0.5–2 s *every time* and forgets everything.
+- **It plays.** The audio server is booted, controlled and diagnosed by a
+  hand-written OSC client: `/status`, `/d_load`, `/s_new`, `/n_set`, `/n_free`,
+  `/g_queryTree`, `/quit`. No OSC library, no Python, no Rust, no MCP server —
+  plain JavaScript with zero dependencies.
+- **It reads.** The `.schelp` reference that ships with the install is searched
+  and read, so the agent looks up what `RLPF` actually takes instead of guessing
+  from the shape of the name.
+- **It teaches.** Five skills carry the language, the SynthDef lifecycle, the
+  live-coding workflow, the documentation map and the project layout. Every
+  code example in them is **compiled** by a check, so a skill cannot quietly
+  teach the model a mistake.
+- **It stays out of the way.** `.scd` files open in the editor vncode already
+  ships, and the agent works on them as files. The plugin's own UI is one console
+  panel: the session's output, an input line, a Stop.
 
-**Execution**
-- `check_sclang_syntax(code)` — compile-check without executing (~0.5–2s class library load)
-- `ensure_supercollider_app_on(port?, use_supernova?, boot_server?)` — ensures SuperCollider app/runtime (`scide`/`sclang`) is ON; optionally boots/reuses audio server too
-- `ensure_supercollider_server_on(port?, use_supernova?)` — ensure server is ON; reuse existing reachable `scsynth`/`supernova` or boot one if none are running
-- `start_supercollider_server(port?, use_supernova?)` — boot scsynth/supernova directly from the detected install; no IDE needed
-- `set_supercollider_server_active(server_pid?, osc_port?)` — ensure server is ACTIVE for MCP control; starts one if none is running
-- `set_supercollider_server_inactive()` — mark server control state INACTIVE without killing the process
-- `turn_down_supercollider_server(server_pid?, osc_port?)` — stop the server and mark control state INACTIVE
-- `play_test_tone(freq_hz?, amp?, duration_s?, server_pid?, osc_port?)` — deterministic short beep to verify actual audio output path (auto-loads `mcpTone` SynthDef if needed)
-- `get_audio_diagnostics(server_pid?, osc_port?)` — inspect target PID/port, `/status.reply` metrics, and scsynth log tail (if launched by MCP)
-- `execute_supercollider_code(code, server_pid?, osc_port?)` — run sclang against live `scsynth`; e.g. `{ SinOsc.ar(440, 0, 0.3) }.play`
-- `stop_supercollider_synths(server_pid?, osc_port?)` — `Server.default.freeAll` (silence all synths)
-- `quit_supercollider_server(server_pid?, osc_port?)` — send OSC `/quit` to stop the server process
-- `reboot_supercollider_server(server_pid?, osc_port?)` — `/quit` then respawn with `-u <port>`
+## Install
 
+**With the [vncode](https://github.com/vecnode) pack (DSH):** the pack installs
+this package from its `packages/` folder. On Windows run `scripts\install.bat` in
+that repository; on macOS or Linux, `./scripts/install.sh`. Then restart the
+harness and hard-refresh the browser.
 
-### API
+**On its own (this repository):**
 
-**API/Internal only (remove from MCP surface, keep in app API)**
-- `discover_supercollider`
-- `list_server_candidates`
-- `get_servers`
-- `detect_supercollider_install`
-- `get_supercollider_version`
-- `get_server_docs`
-- `get_docs_index_status`
-- `refresh_supercollider_docs_index`
-- `get_mcp_tool_routing_hints`
-- `get_audio_cards_raw_info`
-- `get_audio_endpoints_raw_info`
-- `get_audio_stack_report`
-- `start_supercollider_server`
-- `ensure_supercollider_server_on`
-- `set_supercollider_server_active`
-- `set_supercollider_server_inactive`
-- `turn_down_supercollider_server`
-- `quit_supercollider_server`
+```
+scripts\install.ps1 -Force        # Windows
+./scripts/install.sh --force      # macOS / Linux
+```
 
-### Open WebUI (example)
+**For an agent that is not DSH:** `plugin/mcp/stdio.js` is an MCP server over the
+same engine.
 
-- Add MCP server URL `http://127.0.0.1:8787/mcp` (Streamable HTTP).
-- In chat, enable tools.
+```json
+{
+  "mcpServers": {
+    "supercollider": {
+      "command": "node",
+      "args": ["<this repo>/plugin/mcp/stdio.js"]
+    }
+  }
+}
+```
+
+**Skills alone**, for any agent that reads them: point it at
+`plugin/skills/*/SKILL.md`, or copy those folders into the agent's skills
+directory. They are ordinary skill documents with `name`, `description` and
+`whenToUse` frontmatter.
+
+## Requirements
+
+- **SuperCollider 3.13 or newer** (`sclang` and `scsynth`), installed the normal
+  way. This is the only requirement, and there is nothing else to install.
+- **Node.js 22 or newer** for the plugin host.
+
+The install is found on `PATH`, at the platform's standard locations — including
+the *versioned* folders a real install uses, such as
+`C:\Program Files\SuperCollider-3.14.1` — or through `DSH_SC_SCLANG` and
+`DSH_SC_SCSYNTH`.
+
+## The tools
+
+Ten, organised by intent rather than by mechanism.
+
+| Tool | What it does |
+|---|---|
+| `sc_status` | What is installed, what is running, which ports answered `/status` |
+| `sc_help` | Search, read and quote the installed `.schelp` reference |
+| `sc_check` | Compile-check sclang without running it |
+| `sc_exec` | Run code in the session that stays alive — the real-time core |
+| `sc_play` | A known-good tone, and the report of what the server actually did |
+| `sc_project` | Read, list and write `.scd` files; send one to the live session |
+| `sc_load` | Evaluate a `.scd` that is on disk — the edit-here / hear-it loop |
+| `sc_synthdef` | Compile, cache, load, list and free SynthDefs |
+| `sc_nodes` | The running graph: tree, set a control while it plays, free, free all |
+| `sc_server` | Boot, quit, reboot and diagnose the audio server |
+
+## The skills
+
+| Skill | What it teaches |
+|---|---|
+| `supercollider-live-coding` | Building a piece while it plays: `Ndef`, `Pbind`, changing a parameter in place, and stopping cleanly |
+| `supercollider-synthdefs` | The SynthDef lifecycle and how to read the compiler when it refuses |
+| `supercollider-language` | The language itself: function blocks, `var` scoping, `.ar`/`.kr`, multi-channel expansion, and what each error means |
+| `supercollider-scout-docs` | Finding the answer in the installed reference instead of guessing |
+| `supercollider-projects` | `.scd` files, session state versus file state, and how SuperCollider packages a piece |
+
+## What is in the repository
+
+```
+plugin/          THE PACKAGE - this is what vncode ships as packages/dsh-supercollider/
+  lib/engine/    the engine: OSC, install and process discovery, the sclang session,
+                 scsynth control, the .schelp index, the .scd file workflow
+  lib/tools.js   the ten tools
+  lib/client.js  the console tab
+  skills/        the five skills
+  mcp/stdio.js   the MCP face for other clients
+legacy/          the Rust and Python MCP servers this was ported from, still working
+scripts/         install (PowerShell + POSIX shell), the vncode sync, the checks
+```
+
+**Why `text-to-sc` is the source and vncode gets a copy.** The pack ships
+`packages/` as a live-linked directory inside a distribution, and its version
+manifest is checked against every package's `package.json`; a git submodule at an
+external path satisfies neither, and a `node_modules` dependency is skipped by the
+distribution outright. So `scripts/sync-to-vncode.mjs` writes the copy, and
+`--check` fails when it has fallen behind.
+
+**Why the old MCP servers are still here.** They are the reference the port
+followed and they still run: see [`legacy/README.md`](legacy/README.md) for what
+was kept, what was changed and what was deliberately dropped.
+
+## Verify
+
+```
+node scripts/checks/check-sc-node.mjs        # the engine, offline
+node scripts/checks/check-sc-examples.mjs    # every skill example, compiled
+node scripts/checks/check-sc-wiring.mjs      # the package's contract, without the harness
+node scripts/sync-to-vncode.mjs --check      # is the vncode copy stale?
+```
+
+All three checks skip a section loudly and exit 0 on a machine with no
+SuperCollider, and none is ever weakened to make a change pass.
+
+`check-sc-wiring.mjs` is the one to run before touching packaging: it asserts the
+manifest the harness reads (`dsh.bundle.patch`, `dsh.client.platform`, the
+`./client` export), runs the browser bundle as the classic script a loader
+instantiates — including calling its factory, since that is where the stylesheet
+and the plugin face live — and drives `apply(ctx)` against a stub context to
+prove ten tools, three routes and five skills register and that every tool
+declares the output contract the registry enforces.
+
+## Limits
+
+- **No SuperCollider binary is shipped.** It is ~50 MB and installer-specific, so
+  the plugin finds yours or tells you how to get one.
+- **One interpreter and one audio server are shared** by every conversation, in
+  both the plugin and the console. An audio device is one global resource;
+  `sc_status` says who owns it rather than pretending otherwise.
+- **Per-process disk I/O and audio-device enumeration are not reported**: neither
+  has a zero-dependency source in Node. `sc_server action=diagnose` reads the
+  server's own log for the device instead.
+- **Answers over 32 KiB go through a file** under `$DSH_HOME`, with a SHA-256 in
+  the inline answer. That is measured, not defensive: a large print through the
+  `sclang` prompt arrives interleaved with the input echo and truncated.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

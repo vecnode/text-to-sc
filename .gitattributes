@@ -1,0 +1,31 @@
+# Line endings.
+#
+# EVERYTHING IS LF UNLESS A LATER RULE SAYS OTHERWISE. This matters here for
+# three concrete reasons rather than for tidiness:
+#
+#   1. `plugin/` is vendored into the vncode pack by `scripts/sync-to-vncode.mjs`,
+#      and BOTH sides of that copy are compared byte for byte (`--check` fails on
+#      any difference). With `core.autocrlf=true` a Windows checkout materialises
+#      these files as CRLF while the commit holds LF, so the sync would report
+#      drift on every file on exactly the machine it runs on.
+#   2. The pack's own distribution records a sha256 per shipped file, and a
+#      copied file whose line endings depend on who checked it out cannot be
+#      verified against the commit it came from.
+#   3. `scripts/install.sh` is a shebang script: a CRLF shebang does not run.
+#
+# LF is what git STORES either way - it normalises on commit - so this rule only
+# stops the checkout from disagreeing with the commit.
+* text=auto eol=lf
+
+# A shebang script, explicit even though the catch-all covers it: it is the rule
+# that must not be lost if the catch-all is ever narrowed.
+*.sh text eol=lf
+
+# The browser bundle is a classic script the harness reads as bytes and the
+# pack's checks compare against the source repository.
+plugin/lib/client.js text eol=lf
+
+# Batch and cmd files are the Windows launchers, and cmd.exe wants CRLF. The
+# LAST matching rule wins, so these sit below the catch-all on purpose.
+*.bat text eol=crlf
+*.cmd text eol=crlf

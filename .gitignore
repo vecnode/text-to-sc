@@ -1,9 +1,21 @@
+# Rust build output (legacy/rust-server)
 target
 target/
-.DS_Store
 
-
+# Python bytecode (legacy/mcp_py)
 __pycache__
 *.pyc
 *.pyo
 *.pyd
+
+# Editors and the OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# The plugin writes nothing here at runtime - its state lives under
+# $DSH_HOME/dsh-supercollider/ - so anything below is a stray from a probe or a
+# manual test and must not be committed.
+.scratch-*
+.probe-*
+*.log
